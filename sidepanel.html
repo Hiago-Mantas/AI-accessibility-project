@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<title>Leitor Acessível</title>
+<link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+  <header class="topo">
+    <h1>Leitor Acessível</h1>
+    <button id="btn-config" aria-label="Abrir configurações da chave de API" aria-expanded="false">⚙</button>
+  </header>
+
+  <section id="painel-config" class="painel-config oculto" aria-label="Configurações">
+    <label for="input-api-key">Chave de API da Anthropic (opcional)</label>
+    <input type="password" id="input-api-key" placeholder="sk-ant-..." autocomplete="off" />
+    <p class="ajuda">
+      Sem chave, o texto é lido exatamente como extraído da página. Com uma chave,
+      o texto é reestruturado por IA antes da leitura (mais claro em páginas mal organizadas).
+    </p>
+    <button id="btn-salvar-key">Salvar</button>
+  </section>
+
+  <main id="conteudo-principal" aria-live="polite">
+    <div id="estado-inicial" class="estado">
+      <p>Abra qualquer página e clique em "Ler esta página" para começar.</p>
+      <button id="btn-extrair" class="botao-principal">Ler esta página</button>
+    </div>
+
+    <div id="estado-carregando" class="estado oculto" role="status">
+      <p id="texto-carregando">Extraindo conteúdo da página…</p>
+    </div>
+
+    <div id="estado-erro" class="estado oculto" role="alert">
+      <p id="texto-erro"></p>
+      <button id="btn-tentar-de-novo" class="botao-secundario">Tentar novamente</button>
+    </div>
+
+    <div id="estado-leitura" class="estado oculto">
+      <h2 id="titulo-artigo"></h2>
+      <p id="meta-artigo" class="meta"></p>
+
+      <div class="controles" role="group" aria-label="Controles de leitura">
+        <button id="btn-anterior" aria-label="Seção anterior">⏮ Anterior</button>
+        <button id="btn-play-pause" aria-label="Reproduzir leitura">▶ Ler</button>
+        <button id="btn-proxima" aria-label="Próxima seção">Próxima ⏭</button>
+      </div>
+
+      <div class="controle-velocidade">
+        <label for="input-velocidade">Velocidade da voz</label>
+        <input type="range" id="input-velocidade" min="0.5" max="2" step="0.1" value="1" />
+        <span id="valor-velocidade">1.0×</span>
+      </div>
+
+      <nav aria-label="Seções do artigo" class="lista-secoes" id="lista-secoes"></nav>
+
+      <div class="texto-atual-wrap">
+        <h3 class="rotulo">Lendo agora</h3>
+        <p id="texto-atual" tabindex="-1"></p>
+      </div>
+    </div>
+  </main>
+
+  <p class="atalhos">
+    Atalhos: <kbd>Espaço</kbd> reproduzir/pausar · <kbd>←</kbd> seção anterior · <kbd>→</kbd> próxima seção
+  </p>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

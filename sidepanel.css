@@ -1,0 +1,231 @@
+@import url("https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap");
+
+:root {
+  --bg: #fdfbf7;
+  --texto: #1a1a1a;
+  --primaria: #1b4b43;
+  --primaria-hover: #143832;
+  --secundaria: #6b7280;
+  --borda: #d9d4c8;
+  --foco: #0b5fff;
+  --destaque-bg: #eaf1ee;
+  --erro: #a3272c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 16px;
+  font-family: "Atkinson Hyperlegible", system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  background: var(--bg);
+  color: var(--texto);
+  width: 360px;
+}
+
+h1 {
+  font-size: 1.25rem;
+  margin: 0;
+}
+
+.topo {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.topo button {
+  background: none;
+  border: 1px solid var(--borda);
+  border-radius: 6px;
+  font-size: 1rem;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+button {
+  font-family: inherit;
+  font-size: 0.95rem;
+}
+
+button:focus-visible,
+input:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid var(--foco);
+  outline-offset: 2px;
+}
+
+.oculto {
+  display: none !important;
+}
+
+.painel-config {
+  border: 1px solid var(--borda);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 16px;
+  background: #fff;
+}
+
+.painel-config label {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.painel-config input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--borda);
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.ajuda {
+  font-size: 0.85rem;
+  color: var(--secundaria);
+}
+
+.botao-principal {
+  background: var(--primaria);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 18px;
+  font-weight: 700;
+  cursor: pointer;
+  width: 100%;
+}
+
+.botao-principal:hover {
+  background: var(--primaria-hover);
+}
+
+.botao-secundario {
+  background: transparent;
+  border: 1px solid var(--primaria);
+  color: var(--primaria);
+  border-radius: 8px;
+  padding: 10px 16px;
+  cursor: pointer;
+}
+
+#estado-erro {
+  color: var(--erro);
+  border: 1px solid var(--erro);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fdf2f2;
+}
+
+.meta {
+  color: var(--secundaria);
+  font-size: 0.9rem;
+  margin-top: -6px;
+}
+
+.controles {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.controles button {
+  flex: 1;
+  padding: 10px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--primaria);
+  background: #fff;
+  color: var(--primaria);
+  cursor: pointer;
+}
+
+#btn-play-pause {
+  background: var(--primaria);
+  color: #fff;
+}
+
+.controle-velocidade {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.controle-velocidade label {
+  font-size: 0.85rem;
+  color: var(--secundaria);
+  flex-shrink: 0;
+}
+
+.controle-velocidade input {
+  flex: 1;
+}
+
+.lista-secoes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+  border-top: 1px solid var(--borda);
+  border-bottom: 1px solid var(--borda);
+  padding: 8px 0;
+  margin-bottom: 14px;
+}
+
+.item-secao {
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--texto);
+  font-size: 0.9rem;
+}
+
+.item-secao:hover {
+  background: var(--destaque-bg);
+}
+
+.item-secao[aria-current="true"] {
+  background: var(--destaque-bg);
+  font-weight: 700;
+  border-left: 4px solid var(--primaria);
+}
+
+.rotulo {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--secundaria);
+  margin-bottom: 4px;
+}
+
+#texto-atual {
+  background: #fff;
+  border: 1px solid var(--borda);
+  border-radius: 8px;
+  padding: 12px;
+  min-height: 60px;
+}
+
+.atalhos {
+  font-size: 0.75rem;
+  color: var(--secundaria);
+  margin-top: 14px;
+  text-align: center;
+}
+
+kbd {
+  border: 1px solid var(--borda);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: inherit;
+}
