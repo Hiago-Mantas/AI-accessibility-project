@@ -26,12 +26,21 @@ const el = {
   btnProxima: document.getElementById("btn-proxima"),
   inputVelocidade: document.getElementById("input-velocidade"),
   valorVelocidade: document.getElementById("valor-velocidade"),
+  anunciador: document.getElementById("anunciador"),
 };
 
 let secoes = [];
 let indiceAtual = 0;
 let falando = false;
 let apiKey = null;
+
+function anunciar(mensagem) {
+  // Limpa antes para que a mesma mensagem repetida seja anunciada de novo
+  el.anunciador.textContent = "";
+  setTimeout(() => {
+    el.anunciador.textContent = mensagem;
+  }, 50);
+}
 
 function mostrarEstado(nome) {
   for (const id of ["estadoInicial", "estadoCarregando", "estadoErro", "estadoLeitura"]) {
@@ -107,6 +116,12 @@ function iniciarExtracao() {
     indiceAtual = 0;
     exibirSecaoAtual();
     mostrarEstado("estadoLeitura");
+    // O botão "Ler esta página" sumiu: leva o foco para o play, senão ele
+    // se perde no <body> e o usuário de teclado/leitor de tela fica sem rumo
+    el.btnPlayPause.focus();
+    anunciar(
+      `Conteúdo carregado: ${resposta.titulo}. ${secoes.length} ${secoes.length === 1 ? "seção" : "seções"}.`
+    );
   });
 }
 
@@ -180,18 +195,15 @@ function montarListaSecoes() {
     const botao = document.createElement("button");
     botao.className = "item-secao";
     botao.textContent = secao.titulo || `Trecho ${i + 1}`;
-    botao.addEventListener("click", () => {
-      indiceAtual = i;
-      exibirSecaoAtual();
-      if (falando) lerSecaoAtual();
-    });
+    botao.addEventListener("click", () => irPara(i));
     el.listaSecoes.appendChild(botao);
   });
 }
 
 function exibirSecaoAtual() {
   el.textoAtual.textContent = secoes[indiceAtual].texto;
-  el.textoAtual.focus();
+  // Não move o foco para o texto: isso faria o leitor de tela ler a seção
+  // inteira por cima da voz da extensão.
   Array.from(el.listaSecoes.children).forEach((botao, i) => {
     botao.setAttribute("aria-current", String(i === indiceAtual));
     if (i === indiceAtual) botao.scrollIntoView({ block: "nearest" });
@@ -205,7 +217,14 @@ function irPara(novoIndice) {
   if (novoIndice < 0 || novoIndice >= secoes.length) return;
   indiceAtual = novoIndice;
   exibirSecaoAtual();
-  if (falando) lerSecaoAtual();
+  if (falando) {
+    lerSecaoAtual();
+  } else {
+    // Pausado: a voz da extensão está calada, então só anuncia onde o
+    // usuário chegou (curto), sem ler o conteúdo.
+    const titulo = secoes[indiceAtual].titulo;
+    anunciar(`Seção ${indiceAtual + 1} de ${secoes.length}${titulo ? ": " + titulo : ""}`);
+  }
 }
 
 // ---------- síntese de voz ----------

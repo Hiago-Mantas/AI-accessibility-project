@@ -64,6 +64,19 @@ input:focus-visible,
   display: none !important;
 }
 
+/* Invisível na tela, mas lido por leitores de tela */
+.visualmente-oculto {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .painel-config {
   border: 1px solid var(--borda);
   border-radius: 8px;
