@@ -278,8 +278,13 @@ function lerSecaoAtual() {
 // ---------- atalhos de teclado ----------
 
 document.addEventListener("keydown", (evento) => {
-  const dentroDeCampoDeTexto = ["INPUT", "TEXTAREA"].includes(evento.target.tagName);
-  if (dentroDeCampoDeTexto || el.estadoLeitura.classList.contains("oculto")) return;
+  const tag = evento.target.tagName;
+  const dentroDeCampo = ["INPUT", "TEXTAREA", "SELECT"].includes(tag);
+  if (dentroDeCampo || el.estadoLeitura.classList.contains("oculto")) return;
+  // Não rouba combinações do navegador/leitor de tela (ex: NVDA usa Insert/Ctrl)
+  if (evento.ctrlKey || evento.altKey || evento.metaKey) return;
+  // Em botões e links, Espaço é a ativação nativa: deixa o navegador agir
+  if (evento.code === "Space" && ["BUTTON", "A"].includes(tag)) return;
 
   if (evento.code === "Space") {
     evento.preventDefault();
