@@ -99,14 +99,21 @@ function extrairConteudoPagina() {
   };
 }
 
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.tipo === "EXTRACT_CONTENT") {
-    try {
-      const resultado = extrairConteudoPagina();
-      sendResponse(resultado);
-    } catch (erro) {
-      sendResponse({ ok: false, motivo: "Erro ao processar a página: " + erro.message });
+// O background pode injetar este script de novo numa aba que já o tem
+// (ver extrairDaAba): registra o listener uma vez só, senão a página
+// responderia em dobro.
+if (!globalThis.leitorAcessivelCarregado) {
+  globalThis.leitorAcessivelCarregado = true;
+
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.tipo === "EXTRACT_CONTENT") {
+      try {
+        const resultado = extrairConteudoPagina();
+        sendResponse(resultado);
+      } catch (erro) {
+        sendResponse({ ok: false, motivo: "Erro ao processar a página: " + erro.message });
+      }
     }
-  }
-  return true; // resposta assíncrona
-});
+    return true; // resposta assíncrona
+  });
+}
