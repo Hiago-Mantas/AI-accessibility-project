@@ -1,5 +1,9 @@
 # Leitor Acessível com IA — protótipo
 
+[![Baixar o Leitor Acessível (.zip)](https://img.shields.io/badge/Baixar-Leitor%20Acess%C3%ADvel%20%28.zip%29-2ea44f?style=for-the-badge&logo=github)](https://github.com/Hiago-Mantas/AI-accessibility-project/archive/refs/heads/main.zip)
+
+<sub>Baixa a versão mais recente do branch `main` (extensão + backend).</sub>
+
 Extensão de navegador (Manifest V3, Chrome/Edge) que extrai o conteúdo
 principal de qualquer página — usando a mesma engine do Firefox Reader View
 (Readability.js) — e lê em voz alta, seção por seção, com navegação por
@@ -8,10 +12,16 @@ antes de narrar, para lidar melhor com páginas mal organizadas.
 
 ## Como instalar (modo desenvolvedor)
 
-1. Abra `chrome://extensions` (ou `edge://extensions`)
-2. Ative o "Modo do desenvolvedor" (canto superior direito)
-3. Clique em "Carregar sem compactação" e selecione a pasta `leitor-acessivel`
-4. Clique no ícone da extensão em qualquer página para abrir o painel lateral
+1. Clique no botão **Baixar** acima e descompacte o arquivo. Vai aparecer a
+   pasta `AI-accessibility-project-main`
+2. Abra `chrome://extensions` (ou `edge://extensions`)
+3. Ative o "Modo do desenvolvedor" (canto superior direito)
+4. Clique em "Carregar sem compactação" e selecione a pasta
+   `AI-accessibility-project-main`
+5. Clique no ícone da extensão em qualquer página para abrir o painel lateral
+
+Para a descrição de imagens funcionar, o backend precisa estar rodando:
+veja [backend/README.md](backend/README.md).
 
 ## Como usar
 
