@@ -34,21 +34,43 @@ um backend próprio guardando a chave, com a extensão chamando esse backend.
 
 ## Descrição automática de imagens sem alt text
 
-Com uma chave de API configurada, a extensão também detecta `<img>` sem
-`alt` (ou com `alt=""`) que não pareçam puramente decorativas (ícones
-pequenos, `role="presentation"` e `aria-hidden="true"` são ignorados) e
-manda cada uma para a API de visão do Claude, pedindo uma descrição curta
-que é inserida na leitura no lugar da imagem.
+A extensão lê o texto alternativo que a página já oferece e só usa IA
+quando ele falta:
 
-- Limite de 8 imagens por página no protótipo (controla custo e latência —
-  ajustável em `LIMITE_IMAGENS_POR_PAGINA` no `sidepanel.js`)
-- Imagens que já têm `alt` preenchido são lidas direto, sem gastar chamada
-  de API
-- Sem chave de API configurada, a extensão não descreve as imagens, mas
-  avisa na leitura que a seção contém imagem sem descrição — em vez de
-  simplesmente omitir essa informação
-- Imagens atrás de login/CORS podem falhar na descrição (a API busca a
-  URL do lado do servidor); nesse caso a seção segue sem travar
+1. **Alt primeiro:** imagens com `alt`, `aria-label` ou `title` são lidas
+   direto, sem IA. Alt genérico (`"imagem"`, `"IMG_1234.jpg"`) conta como
+   ausente.
+2. **Decorativas ignoradas:** ícones pequenos, `role="presentation"` e
+   `aria-hidden="true"` não são lidos nem enviados.
+3. **IA só para o resto:** as imagens sem alt são reduzidas no navegador e
+   enviadas ao [backend do projeto](backend/README.md), que pede a descrição
+   ao Google Gemini. A chave do Gemini fica só no backend, nunca na extensão.
+4. **Economia:** cerca de 270 tokens por imagem, cache da mesma imagem na
+   sessão e no máximo 8 imagens por página (`LIMITE_IMAGENS_POR_PAGINA` no
+   `sidepanel.js`).
+5. **Descrição curta por padrão:** uma frase, como "Goleiro do Santos durante
+   o treino." Descrições detalhadas podem ser ligadas no ⚙.
+
+Páginas sem texto de artigo (galerias de fotos) também funcionam: a
+extensão lê só a foto que está visível na tela, ignorando os outros slides
+do carrossel (escondidos, empilhados atrás ou cortados pela borda).
+
+Se o navegador não conseguir baixar a imagem direto (sites que só entregam
+a foto para quem está na página deles, imagens `blob:`), a própria página
+entrega a imagem para a extensão.
+
+Se a descrição falhar (imagem SVG, backend desligado, cota esgotada), a
+leitura avisa "Imagem sem descrição" em vez de omitir a imagem, e o motivo
+técnico aparece em letras pequenas no painel.
+
+**Configuração:** o endereço do backend fica em `config.js`
+(`URL_BACKEND`). Para testar no computador, rode o backend com
+`npx wrangler dev` (veja [backend/README.md](backend/README.md)). A
+descrição pode ser desligada no ⚙ do painel.
+
+**Privacidade:** imagens sem alt são enviadas ao backend e ao Google
+Gemini. No plano gratuito, o Google pode usá-las para melhorar os produtos
+dele. A extensão avisa isso nas configurações.
 
 ## O que já funciona
 
