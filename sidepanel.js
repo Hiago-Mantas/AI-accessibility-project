@@ -26,12 +26,23 @@ const el = {
   btnProxima: document.getElementById("btn-proxima"),
   inputVelocidade: document.getElementById("input-velocidade"),
   valorVelocidade: document.getElementById("valor-velocidade"),
+  anunciador: document.getElementById("anunciador"),
 };
 
 let secoes = [];
 let indiceAtual = 0;
 let falando = false;
 let apiKey = null;
+let geracaoFala = 0; // incrementa a cada nova leitura/parada: invalida callbacks de falas canceladas
+let utteranceAtual = null; // referência viva evita que o Chrome descarte a fala e nunca dispare onend
+
+function anunciar(mensagem) {
+  // Limpa antes para que a mesma mensagem repetida seja anunciada de novo
+  el.anunciador.textContent = "";
+  setTimeout(() => {
+    el.anunciador.textContent = mensagem;
+  }, 50);
+}
 
 function mostrarEstado(nome) {
   for (const id of ["estadoInicial", "estadoCarregando", "estadoErro", "estadoLeitura"]) {
@@ -107,6 +118,12 @@ function iniciarExtracao() {
     indiceAtual = 0;
     exibirSecaoAtual();
     mostrarEstado("estadoLeitura");
+    // O botão "Ler esta página" sumiu: leva o foco para o play, senão ele
+    // se perde no <body> e o usuário de teclado/leitor de tela fica sem rumo
+    el.btnPlayPause.focus();
+    anunciar(
+      `Conteúdo carregado: ${resposta.titulo}. ${secoes.length} ${secoes.length === 1 ? "seção" : "seções"}.`
+    );
   });
 }
 
@@ -180,18 +197,15 @@ function montarListaSecoes() {
     const botao = document.createElement("button");
     botao.className = "item-secao";
     botao.textContent = secao.titulo || `Trecho ${i + 1}`;
-    botao.addEventListener("click", () => {
-      indiceAtual = i;
-      exibirSecaoAtual();
-      if (falando) lerSecaoAtual();
-    });
+    botao.addEventListener("click", () => irPara(i));
     el.listaSecoes.appendChild(botao);
   });
 }
 
 function exibirSecaoAtual() {
   el.textoAtual.textContent = secoes[indiceAtual].texto;
-  el.textoAtual.focus();
+  // Não move o foco para o texto: isso faria o leitor de tela ler a seção
+  // inteira por cima da voz da extensão.
   Array.from(el.listaSecoes.children).forEach((botao, i) => {
     botao.setAttribute("aria-current", String(i === indiceAtual));
     if (i === indiceAtual) botao.scrollIntoView({ block: "nearest" });
@@ -205,7 +219,14 @@ function irPara(novoIndice) {
   if (novoIndice < 0 || novoIndice >= secoes.length) return;
   indiceAtual = novoIndice;
   exibirSecaoAtual();
-  if (falando) lerSecaoAtual();
+  if (falando) {
+    lerSecaoAtual();
+  } else {
+    // Pausado: a voz da extensão está calada, então só anuncia onde o
+    // usuário chegou (curto), sem ler o conteúdo.
+    const titulo = secoes[indiceAtual].titulo;
+    anunciar(`Seção ${indiceAtual + 1} de ${secoes.length}${titulo ? ": " + titulo : ""}`);
+  }
 }
 
 // ---------- síntese de voz ----------
@@ -228,39 +249,93 @@ function alternarLeitura() {
 
 function pararLeitura() {
   falando = false;
+  geracaoFala += 1;
   speechSynthesis.cancel();
   el.btnPlayPause.textContent = "▶ Ler";
   el.btnPlayPause.setAttribute("aria-label", "Reproduzir leitura");
 }
 
+const TAMANHO_MAX_TRECHO = 200;
+
+function dividirEmTrechos(texto) {
+  // O Chrome corta falas longas (~15s) em várias vozes, então a seção é
+  // lida em trechos curtos, preferindo quebrar no fim das frases.
+  const frases = texto.match(/[^.!?…]+(?:[.!?…]+["')\]]*|$)\s*/g) || [texto];
+  const trechos = [];
+  let atual = "";
+
+  function empurrar(pedaco) {
+    if ((atual + pedaco).length > TAMANHO_MAX_TRECHO && atual) {
+      trechos.push(atual.trim());
+      atual = "";
+    }
+    atual += pedaco;
+  }
+
+  for (const frase of frases) {
+    if (frase.length <= TAMANHO_MAX_TRECHO) {
+      empurrar(frase);
+    } else {
+      // frase gigante (ex: lista sem pontuação): quebra por palavras
+      for (const palavra of frase.split(/(?<=\s)/)) empurrar(palavra);
+    }
+  }
+  if (atual.trim()) trechos.push(atual.trim());
+  return trechos;
+}
+
 function lerSecaoAtual() {
   speechSynthesis.cancel();
-  if (!secoes[indiceAtual]) return;
+  const geracao = ++geracaoFala;
+  const secao = secoes[indiceAtual];
+  if (!secao) return;
 
-  const texto = (secoes[indiceAtual].titulo ? secoes[indiceAtual].titulo + ". " : "") +
-    secoes[indiceAtual].texto;
-  const utter = new SpeechSynthesisUtterance(texto);
-  utter.lang = "pt-BR";
-  utter.rate = Number(el.inputVelocidade.value);
+  const trechos = dividirEmTrechos((secao.titulo ? secao.titulo + ". " : "") + secao.texto);
+  let proximo = 0;
 
-  utter.onend = () => {
-    if (falando && indiceAtual < secoes.length - 1) {
-      indiceAtual += 1;
-      exibirSecaoAtual();
-      lerSecaoAtual();
-    } else {
-      pararLeitura();
+  function falarProximoTrecho() {
+    // Callback de uma leitura que já foi cancelada (navegou/pausou): ignora,
+    // senão ela avançaria de seção sozinha.
+    if (geracao !== geracaoFala || !falando) return;
+
+    if (proximo >= trechos.length) {
+      if (indiceAtual < secoes.length - 1) {
+        indiceAtual += 1;
+        exibirSecaoAtual();
+        lerSecaoAtual();
+      } else {
+        pararLeitura();
+      }
+      return;
     }
-  };
 
-  speechSynthesis.speak(utter);
+    const utter = new SpeechSynthesisUtterance(trechos[proximo++]);
+    utter.lang = "pt-BR";
+    // lida a cada trecho: mudar a velocidade vale a partir da próxima frase
+    utter.rate = Number(el.inputVelocidade.value);
+    utter.onend = falarProximoTrecho;
+    utter.onerror = (evento) => {
+      // "interrupted"/"canceled" vêm do nosso próprio cancel(); outros erros
+      // pulam o trecho em vez de travar a leitura
+      if (evento.error !== "interrupted" && evento.error !== "canceled") falarProximoTrecho();
+    };
+    utteranceAtual = utter;
+    speechSynthesis.speak(utter);
+  }
+
+  falarProximoTrecho();
 }
 
 // ---------- atalhos de teclado ----------
 
 document.addEventListener("keydown", (evento) => {
-  const dentroDeCampoDeTexto = ["INPUT", "TEXTAREA"].includes(evento.target.tagName);
-  if (dentroDeCampoDeTexto || el.estadoLeitura.classList.contains("oculto")) return;
+  const tag = evento.target.tagName;
+  const dentroDeCampo = ["INPUT", "TEXTAREA", "SELECT"].includes(tag);
+  if (dentroDeCampo || el.estadoLeitura.classList.contains("oculto")) return;
+  // Não rouba combinações do navegador/leitor de tela (ex: NVDA usa Insert/Ctrl)
+  if (evento.ctrlKey || evento.altKey || evento.metaKey) return;
+  // Em botões e links, Espaço é a ativação nativa: deixa o navegador agir
+  if (evento.code === "Space" && ["BUTTON", "A"].includes(tag)) return;
 
   if (evento.code === "Space") {
     evento.preventDefault();

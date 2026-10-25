@@ -21,7 +21,12 @@
     <button id="btn-salvar-key">Salvar</button>
   </section>
 
-  <main id="conteudo-principal" aria-live="polite">
+  <!-- Região de anúncio curta e controlada. O <main> não é mais aria-live
+       inteiro: senão o leitor de tela leria o texto da seção junto com a
+       voz da extensão (leitura duplicada). -->
+  <div id="anunciador" class="visualmente-oculto" aria-live="polite" aria-atomic="true"></div>
+
+  <main id="conteudo-principal">
     <div id="estado-inicial" class="estado">
       <p>Abra qualquer página e clique em "Ler esta página" para começar.</p>
       <button id="btn-extrair" class="botao-principal">Ler esta página</button>
