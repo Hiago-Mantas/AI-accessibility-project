@@ -4,6 +4,8 @@ const el = {
   btnConfig: document.getElementById("btn-config"),
   painelConfig: document.getElementById("painel-config"),
   inputApiKey: document.getElementById("input-api-key"),
+  inputDescreverImagens: document.getElementById("input-descrever-imagens"),
+  inputDescricaoDetalhada: document.getElementById("input-descricao-detalhada"),
   btnSalvarKey: document.getElementById("btn-salvar-key"),
 
   estadoInicial: document.getElementById("estado-inicial"),
@@ -20,6 +22,7 @@ const el = {
   metaArtigo: document.getElementById("meta-artigo"),
   listaSecoes: document.getElementById("lista-secoes"),
   textoAtual: document.getElementById("texto-atual"),
+  diagnostico: document.getElementById("diagnostico"),
 
   btnAnterior: document.getElementById("btn-anterior"),
   btnPlayPause: document.getElementById("btn-play-pause"),
@@ -33,6 +36,9 @@ let secoes = [];
 let indiceAtual = 0;
 let falando = false;
 let apiKey = null;
+let descreverImagens = true; // descrever imagens sem alt pelo backend (Gemini)
+let descricaoDetalhada = false; // padrão: uma frase curta por imagem
+let errosDescricao = []; // motivos técnicos das falhas, mostrados (não falados) no painel
 let geracaoFala = 0; // incrementa a cada nova leitura/parada: invalida callbacks de falas canceladas
 let utteranceAtual = null; // referência viva evita que o Chrome descarte a fala e nunca dispare onend
 
@@ -52,11 +58,15 @@ function mostrarEstado(nome) {
 
 // ---------- configuração da chave de API ----------
 
-chrome.storage.local.get(["anthropicApiKey"], (dados) => {
+chrome.storage.local.get(["anthropicApiKey", "descreverImagens", "descricaoDetalhada"], (dados) => {
   if (dados.anthropicApiKey) {
     apiKey = dados.anthropicApiKey;
     el.inputApiKey.value = dados.anthropicApiKey;
   }
+  descreverImagens = dados.descreverImagens !== false; // ligado por padrão
+  el.inputDescreverImagens.checked = descreverImagens;
+  descricaoDetalhada = Boolean(dados.descricaoDetalhada);
+  el.inputDescricaoDetalhada.checked = descricaoDetalhada;
 });
 
 el.btnConfig.addEventListener("click", () => {
@@ -67,7 +77,9 @@ el.btnConfig.addEventListener("click", () => {
 
 el.btnSalvarKey.addEventListener("click", () => {
   apiKey = el.inputApiKey.value.trim() || null;
-  chrome.storage.local.set({ anthropicApiKey: apiKey });
+  descreverImagens = el.inputDescreverImagens.checked;
+  descricaoDetalhada = el.inputDescricaoDetalhada.checked;
+  chrome.storage.local.set({ anthropicApiKey: apiKey, descreverImagens, descricaoDetalhada });
   el.painelConfig.classList.add("oculto");
   el.btnConfig.setAttribute("aria-expanded", "false");
 });
@@ -90,7 +102,12 @@ function iniciarExtracao() {
       return;
     }
 
-    secoes = resposta.secoes.filter((s) => s.texto && s.texto.length > 0);
+    // Mantém por enquanto as seções que só têm imagens: elas ganham texto
+    // na etapa de descrição e só depois as vazias são descartadas
+    errosDescricao = [];
+    secoes = resposta.secoes.filter(
+      (s) => (s.texto && s.texto.length > 0) || (s.imagensSemAlt && s.imagensSemAlt.length > 0)
+    );
 
     if (secoes.length === 0) {
       el.textoErro.textContent = "Nenhum conteúdo legível foi encontrado nesta página.";
@@ -98,23 +115,25 @@ function iniciarExtracao() {
       return;
     }
 
-    if (apiKey) {
-      await reestruturarComIA();
-      await descreverImagensSemAlt();
-    } else {
-      avisarImagensSemDescricao();
-    }
+    if (apiKey) await reestruturarComIA();
+    // As imagens com alt já viraram texto no content.js; só as sem alt vão para a IA
+    const usarIA = descreverImagens && Boolean(URL_BACKEND);
+    if (usarIA) await descreverImagensSemAlt();
+    else avisarImagensSemDescricao();
+    secoes = secoes.filter((s) => s.texto && s.texto.length > 0);
 
     el.tituloArtigo.textContent = resposta.titulo;
     el.metaArtigo.textContent = [
       resposta.autor,
       `~${resposta.tempoLeituraMin} min de leitura`,
       apiKey ? "reestruturado por IA" : "texto original",
+      usarIA ? "imagens sem alt descritas por IA" : null,
     ]
       .filter(Boolean)
       .join(" · ");
 
     montarListaSecoes();
+    mostrarDiagnostico();
     indiceAtual = 0;
     exibirSecaoAtual();
     mostrarEstado("estadoLeitura");
@@ -166,17 +185,28 @@ async function descreverImagensSemAlt() {
       processadas += 1;
       el.textoCarregando.textContent = `Descrevendo imagens sem texto alternativo… (${processadas})`;
 
-      const resultado = await new Promise((resolve) => {
-        chrome.runtime.sendMessage({ tipo: "DESCREVER_IMAGEM", src, apiKey }, resolve);
-      });
-
-      if (resultado && resultado.ok) {
-        secao.texto += ` Imagem: ${resultado.descricao}`;
-      }
-      // se falhar (ex: imagem protegida por login), simplesmente segue sem
-      // travar a leitura do resto da seção
+      const descricao = await descreverPeloBackend(src);
+      // Se falhar (imagem protegida, SVG, backend fora do ar, cota esgotada),
+      // avisa que a imagem existe em vez de omiti-la e segue com o resto
+      secao.texto += descricao
+        ? ` Imagem: ${descricao}`
+        : " Imagem sem descrição: não foi possível analisá-la.";
     }
   }
+}
+
+function descreverPeloBackend(src) {
+  return new Promise((resolve) => {
+    const detalhe = descricaoDetalhada ? "detalhado" : "curto";
+    chrome.runtime.sendMessage({ tipo: "DESCREVER_IMAGEM", src, detalhe }, (resultado) => {
+      if (resultado && resultado.ok) return resolve(resultado.descricao);
+      // a mensagem já diz a etapa: baixar a imagem, falar com o backend, etc.
+      const motivo = (resultado && resultado.motivo) || "sem resposta do background";
+      console.error(`Leitor Acessível: falha na descrição de imagem: ${motivo}`, src);
+      errosDescricao.push(motivo);
+      resolve(null);
+    });
+  });
 }
 
 function avisarImagensSemDescricao() {
@@ -184,7 +214,7 @@ function avisarImagensSemDescricao() {
   // silenciosamente sem essa informação, avisa que ela existe e falta.
   for (const secao of secoes) {
     if (secao.imagensSemAlt && secao.imagensSemAlt.length > 0) {
-      secao.texto += ` (Esta seção contém ${secao.imagensSemAlt.length === 1 ? "uma imagem" : secao.imagensSemAlt.length + " imagens"} sem texto alternativo. Configure uma chave de API para gerar a descrição automaticamente.)`;
+      secao.texto += ` (Esta seção contém ${secao.imagensSemAlt.length === 1 ? "uma imagem" : secao.imagensSemAlt.length + " imagens"} sem texto alternativo. Ative a descrição de imagens nas configurações para ouvi-la.)`;
     }
   }
 }
@@ -200,6 +230,14 @@ function montarListaSecoes() {
     botao.addEventListener("click", () => irPara(i));
     el.listaSecoes.appendChild(botao);
   });
+}
+
+function mostrarDiagnostico() {
+  const unicos = [...new Set(errosDescricao)];
+  el.diagnostico.textContent = unicos.length
+    ? `Detalhes técnicos da falha na descrição: ${unicos.join(" | ")}`
+    : "";
+  el.diagnostico.classList.toggle("oculto", unicos.length === 0);
 }
 
 function exibirSecaoAtual() {

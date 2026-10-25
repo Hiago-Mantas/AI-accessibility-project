@@ -99,6 +99,18 @@ input:focus-visible,
   margin-bottom: 8px;
 }
 
+.painel-config .opcao-marcavel {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 12px;
+}
+
+.painel-config .opcao-marcavel input {
+  width: auto;
+  margin: 4px 0 0;
+}
+
 .ajuda {
   font-size: 0.85rem;
   color: var(--secundaria);

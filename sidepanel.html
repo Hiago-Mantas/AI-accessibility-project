@@ -8,7 +8,7 @@
 <body>
   <header class="topo">
     <h1>Leitor Acessível</h1>
-    <button id="btn-config" aria-label="Abrir configurações da chave de API" aria-expanded="false">⚙</button>
+    <button id="btn-config" aria-label="Abrir configurações" aria-expanded="false">⚙</button>
   </header>
 
   <section id="painel-config" class="painel-config oculto" aria-label="Configurações">
@@ -18,6 +18,18 @@
       Sem chave, o texto é lido exatamente como extraído da página. Com uma chave,
       o texto é reestruturado por IA antes da leitura (mais claro em páginas mal organizadas).
     </p>
+    <label class="opcao-marcavel">
+      <input type="checkbox" id="input-descrever-imagens" checked />
+      Descrever com IA as imagens que não têm texto alternativo
+    </label>
+    <p class="ajuda">
+      Imagens com texto alternativo (alt) são lidas direto, sem IA. As que não têm são
+      enviadas ao servidor do Leitor Acessível e ao Google Gemini para gerar a descrição.
+    </p>
+    <label class="opcao-marcavel">
+      <input type="checkbox" id="input-descricao-detalhada" />
+      Descrições detalhadas (padrão: uma frase curta, como "Goleiro do Santos durante o treino")
+    </label>
     <button id="btn-salvar-key">Salvar</button>
   </section>
 
@@ -62,6 +74,7 @@
       <div class="texto-atual-wrap">
         <h3 class="rotulo">Lendo agora</h3>
         <p id="texto-atual" tabindex="-1"></p>
+        <p id="diagnostico" class="ajuda oculto"></p>
       </div>
     </div>
   </main>
@@ -70,6 +83,7 @@
     Atalhos: <kbd>Espaço</kbd> reproduzir/pausar · <kbd>←</kbd> seção anterior · <kbd>→</kbd> próxima seção
   </p>
 
+  <script src="config.js"></script>
   <script src="sidepanel.js"></script>
 </body>
 </html>
