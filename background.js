@@ -16,17 +16,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: false, motivo: "Nenhuma aba ativa encontrada." });
         return;
       }
-      chrome.tabs.sendMessage(tabs[0].id, { tipo: "EXTRACT_CONTENT" }, (resposta) => {
-        if (chrome.runtime.lastError) {
-          sendResponse({
-            ok: false,
-            motivo:
-              "Não foi possível acessar esta página (pode ser uma página interna do navegador, ou ela ainda não terminou de carregar).",
-          });
-          return;
-        }
-        sendResponse(resposta);
-      });
+      extrairDaAba(tabs[0].id).then(sendResponse);
     });
     return true; // resposta assíncrona
   }
@@ -45,6 +35,40 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true; // resposta assíncrona
   }
 });
+
+function pedirExtracao(tabId) {
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(tabId, { tipo: "EXTRACT_CONTENT" }, (resposta) => {
+      // lastError precisa ser lido, senão o Chrome registra erro no console
+      resolve(chrome.runtime.lastError ? null : resposta);
+    });
+  });
+}
+
+async function extrairDaAba(tabId) {
+  let resposta = await pedirExtracao(tabId);
+  if (resposta) return resposta;
+
+  // Abas que já estavam abertas antes de instalar/recarregar a extensão não
+  // recebem o content script automaticamente: injeta agora e tenta de novo.
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["readability.js", "content.js"],
+    });
+    resposta = await pedirExtracao(tabId);
+    if (resposta) return resposta;
+  } catch (erro) {
+    // Páginas internas (chrome://, Web Store, visualizador de PDF) não
+    // permitem injeção: cai na mensagem abaixo
+  }
+
+  return {
+    ok: false,
+    motivo:
+      "Não foi possível acessar esta página. Páginas internas do navegador (como chrome:// e a Chrome Web Store) não podem ser lidas por extensões.",
+  };
+}
 
 async function descreverImagem(src, apiKey) {
   if (!apiKey) {
