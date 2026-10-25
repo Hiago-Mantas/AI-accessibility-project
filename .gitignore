@@ -1,0 +1,12 @@
+# Segredos: a chave do Gemini nunca vai para o repositório
+.dev.vars
+.env
+*.local.js
+
+# Dependências e arquivos gerados pelo wrangler (backend)
+node_modules/
+.wrangler/
+
+# Sistema
+.DS_Store
+Thumbs.db

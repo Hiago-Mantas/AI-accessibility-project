@@ -1,0 +1,14 @@
+name = "leitor-acessivel-backend"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+# Modelo do Gemini usado nas descrições (troque se o Google descontinuar este)
+GEMINI_MODELO = "gemini-3.5-flash-lite"
+# Depois de publicar, coloque aqui o ID da extensão para recusar outros sites:
+# ORIGENS_PERMITIDAS = "chrome-extension://SEU_ID_DA_EXTENSAO"
+ORIGENS_PERMITIDAS = ""
+
+# A chave NÃO fica aqui. Ela é um segredo do Worker:
+#   npx wrangler secret put GEMINI_API_KEY
+# Para rodar localmente, ela vai no arquivo .dev.vars (ignorado pelo Git).

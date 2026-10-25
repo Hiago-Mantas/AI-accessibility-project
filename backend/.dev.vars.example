@@ -1,0 +1,3 @@
+# Copie este arquivo para .dev.vars e coloque sua chave do Google AI Studio.
+# O .dev.vars é ignorado pelo Git: a chave nunca vai para o GitHub.
+GEMINI_API_KEY=cole-sua-chave-aqui
