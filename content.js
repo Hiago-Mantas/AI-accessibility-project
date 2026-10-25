@@ -15,6 +15,21 @@ function imagemEhDecorativa(img) {
   return false;
 }
 
+// alt "de enfeite" que não descreve nada: melhor tratar como ausente e
+// deixar a IA descrever do que ler "imagem" ou "IMG_1234.jpg" para o usuário
+const ALT_GENERICO = /^(imagem|image|img|foto|photo|picture|figura|banner|logo|thumbnail|untitled|sem título)?\s*\d*$/i;
+const PARECE_ARQUIVO = /\.(jpe?g|png|gif|webp|avif|svg|bmp)$/i;
+
+function textoAlternativo(img) {
+  // Ordem: alt, aria-label, title. Usar o que a página já oferece evita
+  // gastar uma chamada de IA (e tokens) com a imagem.
+  for (const atributo of ["alt", "aria-label", "title"]) {
+    const valor = (img.getAttribute(atributo) || "").trim();
+    if (valor && !ALT_GENERICO.test(valor) && !PARECE_ARQUIVO.test(valor)) return valor;
+  }
+  return "";
+}
+
 function extrairSecoes(htmlLimpo) {
   // Transforma o HTML já limpo pelo Readability em uma lista de seções
   // usando os headings como pontos de corte. Isso permite navegação
@@ -50,7 +65,7 @@ function extrairSecoes(htmlLimpo) {
     const tag = no.tagName.toLowerCase();
 
     if (tag === "img") {
-      const alt = (no.getAttribute("alt") || "").trim();
+      const alt = textoAlternativo(no);
       if (alt) {
         // já tem alt text: só incorpora como texto, sem gastar chamada de IA
         atual.textos.push(`Imagem: ${alt}.`);
@@ -75,6 +90,79 @@ function extrairSecoes(htmlLimpo) {
   return secoes;
 }
 
+const TAMANHO_MIN_IMAGEM_GALERIA = 150; // px na tela: ignora miniaturas e ícones
+
+function imagemVisivel(img) {
+  const r = img.getBoundingClientRect();
+  const estilo = getComputedStyle(img);
+  return (
+    r.width >= TAMANHO_MIN_IMAGEM_GALERIA &&
+    r.height >= TAMANHO_MIN_IMAGEM_GALERIA &&
+    estilo.visibility !== "hidden" &&
+    Number(estilo.opacity) > 0
+  );
+}
+
+function dentroDaTela(img) {
+  const r = img.getBoundingClientRect();
+  return r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.top < innerHeight;
+}
+
+function opacidadeEfetiva(el) {
+  // Carrosséis costumam esconder o slide pelo elemento pai, não pela imagem
+  let opacidade = 1;
+  for (let no = el; no && no.nodeType === 1; no = no.parentElement) {
+    opacidade *= Number(getComputedStyle(no).opacity);
+  }
+  return opacidade;
+}
+
+function estaNaFrente(img) {
+  // Pergunta ao navegador o que está desenhado no centro da parte visível da
+  // imagem: descarta slides empilhados atrás de outro e slides cortados pela
+  // borda do carrossel. Camadas transparentes por cima (div de clique) não
+  // atrapalham, porque procuramos a primeira <img> visível naquele ponto.
+  const r = img.getBoundingClientRect();
+  const x = (Math.max(r.left, 0) + Math.min(r.right, innerWidth)) / 2;
+  const y = (Math.max(r.top, 0) + Math.min(r.bottom, innerHeight)) / 2;
+  const primeira = document
+    .elementsFromPoint(x, y)
+    .find((el) => el.tagName === "IMG" && opacidadeEfetiva(el) > 0.1);
+  return primeira === img;
+}
+
+function extrairImagensVisiveis() {
+  const grandes = Array.from(document.images).filter(
+    (img) => (img.currentSrc || img.src) && imagemVisivel(img) && !imagemEhDecorativa(img)
+  );
+  // Em carrosséis, os outros slides ficam fora da tela, escondidos ou atrás
+  // da foto atual: lê só a que a pessoa está vendo agora
+  const naTela = grandes.filter(dentroDaTela);
+  const naFrente = naTela.filter(estaNaFrente);
+  const escolhidas = naFrente.length ? naFrente : naTela.length ? naTela : grandes;
+  if (escolhidas.length === 0) return null;
+
+  const textos = [];
+  const imagensSemAlt = [];
+  const vistas = new Set();
+  for (const img of escolhidas) {
+    const src = img.currentSrc || img.src;
+    if (vistas.has(src)) continue;
+    vistas.add(src);
+    const alt = textoAlternativo(img);
+    if (alt) textos.push(`Imagem: ${alt}.`);
+    else imagensSemAlt.push(src);
+  }
+
+  return {
+    ok: true,
+    titulo: document.title,
+    autor: null,
+    tempoLeituraMin: 1,
+    secoes: [{ titulo: "Imagens na tela", texto: textos.join(" "), imagensSemAlt }],
+  };
+}
+
 function extrairConteudoPagina() {
   // Readability.js exige um clone do documento (ele modifica o DOM que recebe)
   const clone = document.cloneNode(true);
@@ -82,6 +170,10 @@ function extrairConteudoPagina() {
   const artigo = reader.parse();
 
   if (!artigo || !artigo.content) {
+    // Sem texto de artigo (galerias, páginas só de fotos): em vez de desistir,
+    // lê as imagens que estão na tela
+    const galeria = extrairImagensVisiveis();
+    if (galeria) return galeria;
     return {
       ok: false,
       motivo: "Não foi possível identificar um conteúdo principal legível nesta página.",
@@ -99,6 +191,39 @@ function extrairConteudoPagina() {
   };
 }
 
+function blobParaDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const leitor = new FileReader();
+    leitor.onload = () => resolve(leitor.result);
+    leitor.onerror = () => reject(leitor.error);
+    leitor.readAsDataURL(blob);
+  });
+}
+
+async function lerImagemNaPagina(src) {
+  // Plano B do background, quando ele não consegue baixar a imagem sozinho.
+  // 1) fetch no contexto da própria página: funciona com blob:, imagens da
+  //    mesma origem que exigem login e sites que só entregam a foto para quem
+  //    está na página deles
+  try {
+    const resposta = await fetch(src);
+    if (resposta.ok) return await blobParaDataUrl(await resposta.blob());
+  } catch (erro) {
+    // segue para a tentativa 2
+  }
+  // 2) a imagem que já está carregada na tela, copiada para um canvas (o
+  //    navegador só permite se ela for da mesma origem ou liberada por CORS)
+  const img = Array.from(document.images).find((i) => i.currentSrc === src || i.src === src);
+  if (img && img.complete && img.naturalWidth) {
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    canvas.getContext("2d").drawImage(img, 0, 0);
+    return canvas.toDataURL("image/jpeg", 0.85); // lança erro se o canvas ficou "contaminado"
+  }
+  throw new Error("imagem não encontrada na página");
+}
+
 // O background pode injetar este script de novo numa aba que já o tem
 // (ver extrairDaAba): registra o listener uma vez só, senão a página
 // responderia em dobro.
@@ -113,6 +238,11 @@ if (!globalThis.leitorAcessivelCarregado) {
       } catch (erro) {
         sendResponse({ ok: false, motivo: "Erro ao processar a página: " + erro.message });
       }
+    }
+    if (msg.tipo === "LER_IMAGEM") {
+      lerImagemNaPagina(msg.src)
+        .then((dataUrl) => sendResponse({ ok: true, dataUrl }))
+        .catch((erro) => sendResponse({ ok: false, motivo: erro.message }));
     }
     return true; // resposta assíncrona
   });
