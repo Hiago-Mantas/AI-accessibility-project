@@ -1,5 +1,10 @@
 # Backend: descrição de imagens com o Google Gemini
 
+[![Baixar o Leitor Acessível (.zip)](https://img.shields.io/badge/Baixar-Leitor%20Acess%C3%ADvel%20%28.zip%29-2ea44f?style=for-the-badge&logo=github)](https://github.com/Hiago-Mantas/AI-accessibility-project/archive/refs/heads/main.zip)
+
+<sub>O backend vem junto no download: fica na pasta `backend` dentro de
+`AI-accessibility-project-main`.</sub>
+
 Servidor pequeno (Cloudflare Worker) que recebe uma imagem da extensão e
 devolve uma descrição curta em português, gerada pelo Google Gemini.
 
