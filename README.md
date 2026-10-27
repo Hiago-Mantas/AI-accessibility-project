@@ -20,8 +20,9 @@ antes de narrar, para lidar melhor com páginas mal organizadas.
    `AI-accessibility-project-main`
 5. Clique no ícone da extensão em qualquer página para abrir o painel lateral
 
-Para a descrição de imagens funcionar, o backend precisa estar rodando:
-veja [backend/README.md](backend/README.md).
+A descrição de imagens já funciona: a extensão usa o backend publicado na
+Cloudflare, sem precisar abrir terminal nem configurar chave. Detalhes em
+[backend/README.md](backend/README.md).
 
 ## Como usar
 
@@ -74,9 +75,10 @@ leitura avisa "Imagem sem descrição" em vez de omitir a imagem, e o motivo
 técnico aparece em letras pequenas no painel.
 
 **Configuração:** o endereço do backend fica em `config.js`
-(`URL_BACKEND`). Para testar no computador, rode o backend com
-`npx wrangler dev` (veja [backend/README.md](backend/README.md)). A
-descrição pode ser desligada no ⚙ do painel.
+(`URL_BACKEND`) e aponta para o backend publicado na Cloudflare. Rodar o
+backend no computador (`npx wrangler dev`) só é preciso para testar
+mudanças nele (veja [backend/README.md](backend/README.md)). A descrição
+pode ser desligada no ⚙ do painel.
 
 **Privacidade:** imagens sem alt são enviadas ao backend e ao Google
 Gemini. No plano gratuito, o Google pode usá-las para melhorar os produtos
