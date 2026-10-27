@@ -72,6 +72,23 @@ descrição pode ser desligada no ⚙ do painel.
 Gemini. No plano gratuito, o Google pode usá-las para melhorar os produtos
 dele. A extensão avisa isso nas configurações.
 
+## Páginas HTML abertas do computador (`file:///`)
+
+Por segurança, o Chrome não deixa extensões lerem arquivos do computador
+sem permissão. Para usar o Leitor Acessível num `.html` local:
+
+1. Abra `chrome://extensions`
+2. Clique em **Detalhes** no Leitor Acessível
+3. Ligue **"Permitir acesso a URLs de arquivo"**
+
+Com isso, o texto e as imagens do arquivo são lidos normalmente, inclusive
+a descrição por IA das imagens sem alt. Se a permissão estiver desligada,
+o painel explica como ligá-la.
+
+Alternativa sem mexer na permissão: abrir a pasta por um servidor local
+(Live Server do VS Code, ou `python -m http.server 8000` e acessar
+`http://localhost:8000/arquivo.html`).
+
 ## O que já funciona
 
 - Extração de conteúdo robusta mesmo sem tags de SEO/schema, via

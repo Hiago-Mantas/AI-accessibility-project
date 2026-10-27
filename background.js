@@ -18,7 +18,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: false, motivo: "Nenhuma aba ativa encontrada." });
         return;
       }
-      extrairDaAba(tabs[0].id).then(sendResponse);
+      extrairDaAba(tabs[0].id, tabs[0].url).then(sendResponse);
     });
     return true; // resposta assíncrona
   }
@@ -47,7 +47,24 @@ function pedirExtracao(tabId) {
   });
 }
 
-async function extrairDaAba(tabId) {
+const MOTIVO_PAGINA_INTERNA =
+  "Não foi possível acessar esta página. Páginas internas do navegador (como chrome:// e a Chrome Web Store) não podem ser lidas por extensões.";
+const MOTIVO_ARQUIVO_LOCAL =
+  'Para ler arquivos do seu computador (endereço file:///), ative "Permitir acesso a URLs de arquivo": ' +
+  'abra chrome://extensions, clique em "Detalhes" no Leitor Acessível e ligue essa opção.';
+
+async function motivoDaFalha(url) {
+  // Sem a permissão de arquivos, o Chrome esconde o endereço da aba de um
+  // arquivo local (url fica vazia), então não dá para ter certeza: se a
+  // permissão está desligada, explica como ligá-la junto com o aviso geral
+  if (url && url.startsWith("file:")) return MOTIVO_ARQUIVO_LOCAL;
+  if (!url && !(await chrome.extension.isAllowedFileSchemeAccess())) {
+    return `${MOTIVO_PAGINA_INTERNA} Se for um arquivo do seu computador: ${MOTIVO_ARQUIVO_LOCAL}`;
+  }
+  return MOTIVO_PAGINA_INTERNA;
+}
+
+async function extrairDaAba(tabId, url) {
   let resposta = await pedirExtracao(tabId);
   if (resposta) return resposta;
 
@@ -65,11 +82,7 @@ async function extrairDaAba(tabId) {
     // permitem injeção: cai na mensagem abaixo
   }
 
-  return {
-    ok: false,
-    motivo:
-      "Não foi possível acessar esta página. Páginas internas do navegador (como chrome:// e a Chrome Web Store) não podem ser lidas por extensões.",
-  };
+  return { ok: false, motivo: await motivoDaFalha(url) };
 }
 
 // ---------- descrição de imagens sem alt text (backend + Gemini) ----------
