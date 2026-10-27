@@ -27,7 +27,14 @@ ela fica guardada como **segredo do servidor** e nunca vai para o GitHub.
 6. **Descrição curta por padrão:** uma frase de até 12 palavras (no máximo
    40 tokens de resposta). A versão detalhada é opcional.
 
-## Rodar no seu computador (para testar)
+## Endereço publicado
+
+O backend do projeto está publicado em
+`https://leitor-acessivel-backend.hiagomantas0.workers.dev`, que é o
+endereço configurado no `config.js` da extensão. Quem só quer usar a
+extensão não precisa rodar nada.
+
+## Rodar no seu computador (para testar mudanças no backend)
 
 Precisa do [Node.js](https://nodejs.org) **versão 22 ou mais nova** (o
 wrangler não roda no Node 20). Confira com `node -v`.
@@ -44,8 +51,9 @@ no lugar de `cole-sua-chave-aqui`. Depois:
 npx wrangler dev
 ```
 
-O backend fica em `http://127.0.0.1:8787`, que já é o endereço configurado
-no `config.js` da extensão. Deixe o terminal aberto enquanto testa.
+O backend fica em `http://127.0.0.1:8787`. Para a extensão usar essa cópia
+local, troque o `URL_BACKEND` no `config.js` por esse endereço (e volte
+para o publicado depois). Deixe o terminal aberto enquanto testa.
 
 **No Windows:**
 
