@@ -31,9 +31,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.tipo === "DESCREVER_IMAGEM") {
-    descreverImagem(msg.src, msg.detalhe === "detalhado" ? "detalhado" : "curto")
+    descreverImagem(msg.src, msg.detalhe === "detalhado" ? "detalhado" : "curto", msg.pngConvertido)
       .then((descricao) => sendResponse({ ok: true, descricao }))
-      .catch((erro) => sendResponse({ ok: false, motivo: erro.message }));
+      // svg: o painel converte para PNG e pede de novo (ver descreverPeloBackend)
+      .catch((erro) => sendResponse({ ok: false, motivo: erro.message, svg: erro.svg }));
     return true; // resposta assíncrona
   }
 });
@@ -152,16 +153,28 @@ async function baixarImagem(src) {
   }
 }
 
-async function prepararImagem(src) {
+function pareceSvg(blob, src) {
+  return /svg/i.test(blob.type) || /^data:image\/svg/i.test(src) || /\.svg(\?|#|$)/i.test(src);
+}
+
+async function prepararImagem(src, pngConvertido) {
   // Baixa no navegador (funciona com sites que bloqueiam acesso externo e
-  // com arquivos locais) e reduz para JPEG antes de enviar ao backend
-  const blob = await baixarImagem(src);
+  // com arquivos locais) e reduz para JPEG antes de enviar ao backend.
+  // pngConvertido: SVG que o painel já desenhou e transformou em PNG.
+  const blob = pngConvertido ? await (await fetch(pngConvertido)).blob() : await baixarImagem(src);
 
   let bitmap;
   try {
     bitmap = await createImageBitmap(blob);
   } catch (erro) {
-    throw falhaNaEtapa("abrir a imagem (formato não suportado, ex.: SVG?)", erro);
+    if (!pngConvertido && pareceSvg(blob, src)) {
+      // O service worker não consegue desenhar SVG (e o Gemini não aceita
+      // SVG): devolve o conteúdo para o painel converter em PNG
+      const falha = falhaNaEtapa("converter o SVG", "o painel precisa desenhá-lo");
+      falha.svg = await blob.text();
+      throw falha;
+    }
+    throw falhaNaEtapa("abrir a imagem (formato não suportado)", erro);
   }
   const escala = Math.min(1, LADO_MAX_IMAGEM / Math.max(bitmap.width, bitmap.height));
   const canvas = new OffscreenCanvas(
@@ -174,7 +187,7 @@ async function prepararImagem(src) {
   return paraBase64(await jpeg.arrayBuffer());
 }
 
-async function descreverImagem(src, detalhe) {
+async function descreverImagem(src, detalhe, pngConvertido) {
   if (!URL_BACKEND) throw new Error("Backend não configurado (config.js).");
 
   // A mesma imagem costuma aparecer de novo (recarregar a página, voltar
@@ -185,7 +198,7 @@ async function descreverImagem(src, detalhe) {
     if (guardado[chaveCache]) return guardado[chaveCache];
   }
 
-  const imagem = await prepararImagem(src);
+  const imagem = await prepararImagem(src, pngConvertido);
 
   let resposta;
   try {

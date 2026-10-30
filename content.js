@@ -163,7 +163,24 @@ function extrairImagensVisiveis() {
   };
 }
 
+function imagemAbertaNaAba() {
+  // Aba mostrando uma imagem sozinha (ex.: um .svg aberto direto): não há
+  // HTML nem <img>, a "página" é a própria imagem
+  if (!(document.contentType || "").startsWith("image/")) return null;
+  const nomeArquivo = decodeURIComponent(location.pathname.split("/").pop() || "imagem");
+  return {
+    ok: true,
+    titulo: document.title || nomeArquivo,
+    autor: null,
+    tempoLeituraMin: 1,
+    secoes: [{ titulo: "Imagem aberta nesta aba", texto: "", imagensSemAlt: [location.href] }],
+  };
+}
+
 function extrairConteudoPagina() {
+  const imagemSozinha = imagemAbertaNaAba();
+  if (imagemSozinha) return imagemSozinha;
+
   // Readability.js exige um clone do documento (ele modifica o DOM que recebe)
   const clone = document.cloneNode(true);
   const reader = new Readability(clone, { charThreshold: 100 });
