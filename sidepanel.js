@@ -195,18 +195,59 @@ async function descreverImagensSemAlt() {
   }
 }
 
-function descreverPeloBackend(src) {
-  return new Promise((resolve) => {
-    const detalhe = descricaoDetalhada ? "detalhado" : "curto";
-    chrome.runtime.sendMessage({ tipo: "DESCREVER_IMAGEM", src, detalhe }, (resultado) => {
-      if (resultado && resultado.ok) return resolve(resultado.descricao);
-      // a mensagem já diz a etapa: baixar a imagem, falar com o backend, etc.
-      const motivo = (resultado && resultado.motivo) || "sem resposta do background";
-      console.error(`Leitor Acessível: falha na descrição de imagem: ${motivo}`, src);
-      errosDescricao.push(motivo);
-      resolve(null);
+const LADO_SVG = 768; // px: tamanho em que o SVG é desenhado antes de ir para a IA
+
+function pedirDescricao(mensagem) {
+  return new Promise((resolve) => chrome.runtime.sendMessage(mensagem, resolve));
+}
+
+async function svgParaPng(textoSvg) {
+  // O background (service worker) não desenha SVG; esta página consegue.
+  // Como <img>, scripts dentro do SVG não rodam.
+  const url = URL.createObjectURL(new Blob([textoSvg], { type: "image/svg+xml" }));
+  try {
+    const img = new Image();
+    await new Promise((ok, falha) => {
+      img.onload = ok;
+      img.onerror = () => falha(new Error("SVG inválido"));
+      img.src = url;
     });
-  });
+    // SVG sem width/height não tem tamanho próprio: usa o padrão
+    const largura = img.naturalWidth || LADO_SVG;
+    const altura = img.naturalHeight || LADO_SVG;
+    const escala = LADO_SVG / Math.max(largura, altura); // amplia ícones pequenos também
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(largura * escala);
+    canvas.height = Math.round(altura * escala);
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff"; // fundo transparente viraria preto no JPEG
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/png");
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function descreverPeloBackend(src) {
+  const detalhe = descricaoDetalhada ? "detalhado" : "curto";
+  let resultado = await pedirDescricao({ tipo: "DESCREVER_IMAGEM", src, detalhe });
+
+  if (resultado && !resultado.ok && resultado.svg) {
+    try {
+      const pngConvertido = await svgParaPng(resultado.svg);
+      resultado = await pedirDescricao({ tipo: "DESCREVER_IMAGEM", src, detalhe, pngConvertido });
+    } catch (erro) {
+      resultado = { ok: false, motivo: `[converter o SVG] ${erro.message}` };
+    }
+  }
+
+  if (resultado && resultado.ok) return resultado.descricao;
+  // a mensagem já diz a etapa: baixar a imagem, falar com o backend, etc.
+  const motivo = (resultado && resultado.motivo) || "sem resposta do background";
+  console.error(`Leitor Acessível: falha na descrição de imagem: ${motivo}`, src);
+  errosDescricao.push(motivo);
+  return null;
 }
 
 function avisarImagensSemDescricao() {

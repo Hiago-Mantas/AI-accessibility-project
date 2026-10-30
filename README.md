@@ -70,7 +70,12 @@ Se o navegador não conseguir baixar a imagem direto (sites que só entregam
 a foto para quem está na página deles, imagens `blob:`), a própria página
 entrega a imagem para a extensão.
 
-Se a descrição falhar (imagem SVG, backend desligado, cota esgotada), a
+Imagens SVG (comuns em gráficos e ícones) são desenhadas pelo painel e
+convertidas em PNG antes de ir para a IA, porque o Gemini não aceita SVG.
+Uma imagem aberta sozinha numa aba (por exemplo, um `.svg` ou `.jpg` aberto
+direto) também é descrita.
+
+Se a descrição falhar (imagem protegida, backend fora do ar, cota esgotada), a
 leitura avisa "Imagem sem descrição" em vez de omitir a imagem, e o motivo
 técnico aparece em letras pequenas no painel.
 
