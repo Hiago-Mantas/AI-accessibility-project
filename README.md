@@ -30,6 +30,9 @@ Cloudflare, sem precisar abrir terminal nem configurar chave. Detalhes em
 - Use **Espaço** para reproduzir/pausar, **← / →** para navegar entre seções
 - Clique em qualquer seção na lista para pular direto para ela
 - Ajuste a velocidade da voz no controle deslizante
+- Clique em **"↻ Ler a página de novo"** para extrair a página outra vez e
+  pedir à IA novas descrições das imagens (descarta as descrições guardadas;
+  útil se a página mudou ou se uma descrição saiu ruim)
 
 ## Reestruturação por IA (opcional)
 

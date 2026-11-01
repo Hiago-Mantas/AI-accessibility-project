@@ -17,6 +17,7 @@ const el = {
 
   btnExtrair: document.getElementById("btn-extrair"),
   btnTentarDeNovo: document.getElementById("btn-tentar-de-novo"),
+  btnLerDeNovo: document.getElementById("btn-ler-de-novo"),
 
   tituloArtigo: document.getElementById("titulo-artigo"),
   metaArtigo: document.getElementById("meta-artigo"),
@@ -88,6 +89,20 @@ el.btnSalvarKey.addEventListener("click", () => {
 
 el.btnExtrair.addEventListener("click", iniciarExtracao);
 el.btnTentarDeNovo.addEventListener("click", iniciarExtracao);
+el.btnLerDeNovo.addEventListener("click", lerDeNovo);
+
+let imagensDaPagina = []; // endereços das imagens sem alt da última leitura
+
+async function lerDeNovo() {
+  // Descarta as descrições guardadas das imagens desta página (nos dois
+  // estilos, curto e detalhado) para a IA descrevê-las outra vez, e extrai
+  // a página de novo (ela pode ter mudado desde a última leitura)
+  const chaves = imagensDaPagina.flatMap((src) =>
+    ["curto", "detalhado"].map((detalhe) => `descricao:${detalhe}:${src}`)
+  );
+  if (chaves.length) await chrome.storage.session.remove(chaves);
+  iniciarExtracao();
+}
 
 function iniciarExtracao() {
   pararLeitura();
@@ -105,6 +120,7 @@ function iniciarExtracao() {
     // Mantém por enquanto as seções que só têm imagens: elas ganham texto
     // na etapa de descrição e só depois as vazias são descartadas
     errosDescricao = [];
+    imagensDaPagina = resposta.secoes.flatMap((s) => s.imagensSemAlt || []);
     secoes = resposta.secoes.filter(
       (s) => (s.texto && s.texto.length > 0) || (s.imagensSemAlt && s.imagensSemAlt.length > 0)
     );
