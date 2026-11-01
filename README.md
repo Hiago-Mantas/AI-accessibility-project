@@ -51,8 +51,10 @@ quando ele falta:
 1. **Alt primeiro:** imagens com `alt`, `aria-label` ou `title` são lidas
    direto, sem IA. Alt genérico (`"imagem"`, `"IMG_1234.jpg"`) conta como
    ausente.
-2. **Decorativas ignoradas:** ícones pequenos, `role="presentation"` e
-   `aria-hidden="true"` não são lidos nem enviados.
+2. **Decorativas ignoradas:** imagens que aparecem com menos de 48 px na
+   tela (ícones, inclusive os reduzidos por CSS, e pixels de rastreamento),
+   imagens escondidas e as marcadas com `role="presentation"`/`"none"` ou
+   dentro de um bloco `aria-hidden="true"` não são lidas nem enviadas.
 3. **IA só para o resto:** as imagens sem alt são reduzidas no navegador e
    enviadas ao [backend do projeto](backend/README.md), que pede a descrição
    ao Google Gemini. A chave do Gemini fica só no backend, nunca na extensão.

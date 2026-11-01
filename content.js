@@ -3,16 +3,42 @@
 // side panel (via background) e responde com o conteúdo já limpo e
 // dividido em seções navegáveis.
 
+const TAMANHO_MIN_IMAGEM = 48; // px: abaixo disso é ícone, separador ou pixel de rastreamento
+
+function marcadaComoDecorativa(img) {
+  const papel = img.getAttribute("role");
+  if (papel === "presentation" || papel === "none") return true;
+  // aria-hidden num elemento pai também esconde a imagem do leitor de tela
+  return Boolean(img.closest('[aria-hidden="true"]'));
+}
+
+function imagemOriginal(img) {
+  // A cópia limpa pelo Readability não está desenhada na tela: a imagem de
+  // verdade, com o tamanho real, é a da página, achada pelo endereço
+  if (img.ownerDocument === document) return img;
+  const src = img.getAttribute("src") && img.src;
+  return Array.from(document.images).find((i) => i.currentSrc === src || i.src === src) || null;
+}
+
 function imagemEhDecorativa(img) {
-  // Heurística simples para não gastar chamada de API com ícones/separadores:
-  // imagem pequena ou explicitamente marcada como decorativa/oculta.
-  if (img.getAttribute("role") === "presentation" || img.getAttribute("aria-hidden") === "true") {
-    return true;
+  // Não gasta IA (nem tokens) com ícones, separadores e imagens escondidas
+  const original = imagemOriginal(img);
+  if (marcadaComoDecorativa(img) || (original && marcadaComoDecorativa(original))) return true;
+
+  if (original) {
+    const r = original.getBoundingClientRect();
+    // Desenhada na tela: vale o tamanho em que aparece (um ícone grande
+    // reduzido por CSS continua sendo ícone)
+    if (r.width && r.height) return r.width < TAMANHO_MIN_IMAGEM || r.height < TAMANHO_MIN_IMAGEM;
+    // Não desenhada (display: none, aba fechada): a pessoa não está vendo
+    if (original.complete && getComputedStyle(original).display === "none") return true;
   }
-  const largura = img.naturalWidth || parseInt(img.getAttribute("width") || "0", 10);
-  const altura = img.naturalHeight || parseInt(img.getAttribute("height") || "0", 10);
-  if (largura && altura && (largura < 48 || altura < 48)) return true;
-  return false;
+
+  // Sem como medir na tela: usa o tamanho do arquivo ou os atributos
+  const alvo = original || img;
+  const largura = alvo.naturalWidth || parseInt(alvo.getAttribute("width") || "0", 10);
+  const altura = alvo.naturalHeight || parseInt(alvo.getAttribute("height") || "0", 10);
+  return Boolean(largura && altura && (largura < TAMANHO_MIN_IMAGEM || altura < TAMANHO_MIN_IMAGEM));
 }
 
 // alt "de enfeite" que não descreve nada: melhor tratar como ausente e
@@ -34,8 +60,9 @@ function extrairSecoes(htmlLimpo) {
   // Transforma o HTML já limpo pelo Readability em uma lista de seções
   // usando os headings como pontos de corte. Isso permite navegação
   // "próxima seção / seção anterior", igual leitores de tela tradicionais.
-  const container = document.createElement("div");
-  container.innerHTML = htmlLimpo;
+  // DOMParser cria um documento "inerte": diferente de innerHTML, não faz o
+  // navegador baixar de novo todas as imagens do artigo
+  const container = new DOMParser().parseFromString(htmlLimpo, "text/html").body;
 
   const secoes = [];
   let atual = { titulo: null, textos: [], imagensSemAlt: [] };

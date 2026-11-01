@@ -21,8 +21,9 @@ ela fica guardada como **segredo do servidor** e nunca vai para o GitHub.
 1. **Alt primeiro:** a extensão só manda para a IA as imagens sem texto
    alternativo útil (`alt`, `aria-label` ou `title`). Alt genérico como
    `"imagem"` ou `"IMG_1234.jpg"` conta como ausente.
-2. **Imagens decorativas ignoradas:** ícones pequenos, `role="presentation"`
-   e `aria-hidden="true"` não são enviados.
+2. **Imagens decorativas ignoradas:** ícones (medidos pelo tamanho em que
+   aparecem na tela), pixels de rastreamento, imagens escondidas,
+   `role="presentation"`/`"none"` e `aria-hidden="true"` não são enviados.
 3. **Imagem reduzida:** a extensão manda no máximo 768 px, e o backend pede
    ao Gemini a resolução baixa (`MEDIA_RESOLUTION_LOW`): cerca de **270 tokens
    por imagem**, em vez de ~1.100.
