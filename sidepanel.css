@@ -140,6 +140,11 @@ input:focus-visible,
   cursor: pointer;
 }
 
+.botao-ler-de-novo {
+  width: 100%;
+  margin-bottom: 16px;
+}
+
 #estado-erro {
   color: var(--erro);
   border: 1px solid var(--erro);
