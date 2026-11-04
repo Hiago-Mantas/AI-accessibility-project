@@ -5,11 +5,12 @@
 <sub>O backend vem junto no download: fica na pasta `backend` dentro de
 `AI-accessibility-project-main`.</sub>
 
-Servidor pequeno (Cloudflare Worker) que recebe uma imagem da extensão e
-devolve uma descrição curta em português, gerada pelo Google Gemini.
+Servidor pequeno (Cloudflare Worker) que usa o Google Gemini para duas
+coisas: descrever em português as imagens sem texto alternativo e traduzir
+para o português páginas em outro idioma.
 
 ```
-Extensão ──(imagem reduzida, JPEG)──► Backend (guarda a chave) ──► Google Gemini
+Extensão ──(imagem reduzida ou textos)──► Backend (guarda a chave) ──► Google Gemini
 ```
 
 **Por que existe:** a chave do Gemini não pode ficar dentro da extensão,
@@ -32,6 +33,9 @@ ela fica guardada como **segredo do servidor** e nunca vai para o GitHub.
 5. **Limite por página:** no máximo 8 imagens por página.
 6. **Descrição curta por padrão:** uma frase de até 12 palavras (no máximo
    40 tokens de resposta). A versão detalhada é opcional.
+7. **Tradução só quando precisa:** o idioma é detectado na extensão, então
+   páginas em português nunca chegam aqui. As outras vêm em poucos pedidos
+   (lotes) e o mesmo texto não é traduzido duas vezes na sessão.
 
 ## Endereço publicado
 
@@ -96,7 +100,9 @@ para o publicado depois). Deixe o terminal aberto enquanto testa.
 | `ORIGENS_PERMITIDAS` | IDs de extensão aceitos, separados por vírgula. Vazio = aceita tudo (só para testes). |
 | `GEMINI_API_KEY` | **Segredo.** Nunca no arquivo: use `wrangler secret put` ou o `.dev.vars`. |
 
-## Rota
+## Rotas
+
+### Descrever imagem
 
 `POST /descrever` com `{ "imagem": "<base64>", "tipo": "image/jpeg", "detalhe": "curto" }`
 
@@ -113,10 +119,27 @@ texto visível na imagem). O usuário escolhe no ⚙ da extensão.
 | `429` | Cota do plano gratuito do Gemini esgotada |
 | `502` | O Gemini falhou ou não devolveu descrição |
 
+### Traduzir textos
+
+`POST /traduzir` com `{ "textos": ["Hello", "Our purpose"], "origem": "en" }`
+
+Devolve `200 { "traducoes": ["Olá", "Nosso propósito"] }`, na mesma ordem
+e quantidade. O Gemini responde em JSON (lista de textos), então a
+extensão sempre sabe qual tradução é de qual trecho.
+
+| Resposta | Quando |
+|---|---|
+| `200 { "traducoes": [...] }` | Deu certo |
+| `400` | `textos` ausente, vazio ou não é uma lista de textos |
+| `413` | Mais de 60 textos ou 12.000 caracteres num pedido (a extensão manda lotes menores) |
+| `429` | Cota do plano gratuito do Gemini esgotada |
+| `502` | O Gemini falhou, cortou a resposta ou devolveu uma quantidade diferente de traduções |
+
 ## Limitações conhecidas
 
 - O `ORIGENS_PERMITIDAS` barra o uso casual, mas não é uma proteção forte:
   alguém determinado consegue imitar a origem. Um próximo passo seria um
   limite de pedidos por usuário.
-- No plano gratuito do Gemini, o Google pode usar as imagens enviadas para
-  melhorar os produtos dele. Por isso a extensão avisa isso nas configurações.
+- No plano gratuito do Gemini, o Google pode usar as imagens e os textos
+  enviados para melhorar os produtos dele. Por isso a extensão avisa isso
+  nas configurações.

@@ -30,6 +30,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true; // resposta assíncrona
   }
 
+  if (msg.tipo === "TRADUZIR") {
+    traduzirTextos(msg.textos, msg.origem)
+      .then((traducoes) => sendResponse({ ok: true, traducoes }))
+      .catch((erro) => sendResponse({ ok: false, motivo: erro.message }));
+    return true; // resposta assíncrona
+  }
+
   if (msg.tipo === "DESCREVER_IMAGEM") {
     descreverImagem(msg.src, msg.detalhe === "detalhado" ? "detalhado" : "curto", msg.pngConvertido)
       .then((descricao) => sendResponse({ ok: true, descricao }))
@@ -215,6 +222,95 @@ async function descreverImagem(src, detalhe, pngConvertido) {
 
   if (chaveCache) await chrome.storage.session.set({ [chaveCache]: dados.descricao });
   return dados.descricao;
+}
+
+// Lotes menores que o limite do backend (60 textos / 12.000 caracteres)
+const LOTE_MAX_TEXTOS = 40;
+const LOTE_MAX_CARACTERES = 6000;
+
+function montarLotes(textos) {
+  const lotes = [];
+  let atual = [];
+  let caracteres = 0;
+  for (const texto of textos) {
+    if (atual.length && (atual.length >= LOTE_MAX_TEXTOS || caracteres + texto.length > LOTE_MAX_CARACTERES)) {
+      lotes.push(atual);
+      atual = [];
+      caracteres = 0;
+    }
+    atual.push(texto);
+    caracteres += texto.length;
+  }
+  if (atual.length) lotes.push(atual);
+  return lotes;
+}
+
+function quebrarTextoLongo(texto) {
+  // Um texto maior que o lote é dividido em frases para caber
+  if (texto.length <= LOTE_MAX_CARACTERES) return [texto];
+  const frases = texto.match(/[^.!?]+[.!?]*\s*/g) || [texto];
+  const partes = [];
+  let atual = "";
+  for (const frase of frases) {
+    if (atual && (atual + frase).length > LOTE_MAX_CARACTERES) {
+      partes.push(atual);
+      atual = "";
+    }
+    // frase sozinha maior que o lote (texto sem pontuação): corta no tamanho
+    for (let i = 0; i < frase.length; i += LOTE_MAX_CARACTERES) {
+      const pedaco = frase.slice(i, i + LOTE_MAX_CARACTERES);
+      if (atual && (atual + pedaco).length > LOTE_MAX_CARACTERES) {
+        partes.push(atual);
+        atual = "";
+      }
+      atual += pedaco;
+    }
+  }
+  if (atual) partes.push(atual);
+  return partes;
+}
+
+async function traduzirTextos(textos, origem) {
+  // Traduz para o português. Textos já traduzidos nesta sessão do navegador
+  // vêm do cache (sem gastar tokens); os outros vão ao backend em lotes.
+  if (!URL_BACKEND) throw new Error("Backend não configurado (config.js).");
+  const chave = (texto) => (texto.length <= 2000 ? `traducao:${texto}` : null);
+  const chaves = textos.map(chave).filter(Boolean);
+  const guardados = chaves.length ? await chrome.storage.session.get(chaves) : {};
+  const resultado = textos.map((t) => (chave(t) && guardados[chave(t)]) || null);
+
+  // Textos que faltam, quebrados em partes se forem grandes demais
+  const pendentes = []; // { indice, partes }
+  textos.forEach((texto, i) => {
+    if (resultado[i] === null && texto.trim()) pendentes.push({ indice: i, partes: quebrarTextoLongo(texto) });
+    else if (resultado[i] === null) resultado[i] = texto;
+  });
+  const todasAsPartes = [...new Set(pendentes.flatMap((p) => p.partes))];
+  const traduzidas = new Map();
+
+  for (const lote of montarLotes(todasAsPartes)) {
+    let resposta;
+    try {
+      resposta = await fetch(`${URL_BACKEND}/traduzir`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ textos: lote, origem }),
+      });
+    } catch (erro) {
+      throw falhaNaEtapa("falar com o backend (ele está rodando?)", erro);
+    }
+    const dados = await resposta.json().catch(() => ({}));
+    if (!resposta.ok) throw falhaNaEtapa("backend", dados.erro || `HTTP ${resposta.status}`);
+    lote.forEach((parte, i) => traduzidas.set(parte, dados.traducoes[i]));
+  }
+
+  const paraGuardar = {};
+  for (const { indice, partes } of pendentes) {
+    resultado[indice] = partes.map((p) => traduzidas.get(p)).join(" ");
+    if (chave(textos[indice])) paraGuardar[chave(textos[indice])] = resultado[indice];
+  }
+  if (Object.keys(paraGuardar).length) await chrome.storage.session.set(paraGuardar);
+  return resultado;
 }
 
 async function chamarClaude(textoOriginal, apiKey) {

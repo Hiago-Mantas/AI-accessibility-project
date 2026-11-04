@@ -1,11 +1,14 @@
 // backend/worker.js
-// Servidor (Cloudflare Worker) que descreve imagens sem alt text usando o
-// Google Gemini. A chave da API fica só aqui, como segredo do Worker: nunca
-// vai para a extensão nem para o repositório.
+// Servidor (Cloudflare Worker) que usa o Google Gemini para descrever
+// imagens sem alt text e traduzir páginas para o português. A chave da API
+// fica só aqui, como segredo do Worker: nunca vai para a extensão nem para
+// o repositório.
 //
 // POST /descrever  { imagem: "<base64>", tipo: "image/jpeg", detalhe: "curto" | "detalhado" }
 //   200 → { descricao: "..." }
-//   4xx/5xx → { erro: "..." }
+// POST /traduzir   { textos: ["...", ...], origem: "en" }
+//   200 → { traducoes: ["...", ...] }  (mesma ordem e quantidade)
+// Erros: 4xx/5xx → { erro: "..." }
 
 const MODELO_PADRAO = "gemini-3.5-flash-lite"; // o mais leve que lê imagens bem
 const TIPOS_ACEITOS = ["image/jpeg", "image/png", "image/webp"];
@@ -35,6 +38,18 @@ const ESTILOS = {
   },
 };
 
+// Tradução: a extensão manda vários trechos de uma vez (menos pedidos) e
+// em lotes, então estes limites valem por pedido
+const MAX_TEXTOS = 60;
+const MAX_CARACTERES = 12_000;
+
+const INSTRUCAO_TRADUCAO =
+  "Você traduz textos de páginas web para o português do Brasil, para serem lidos em voz alta " +
+  "para pessoas com deficiência visual. Recebe uma lista JSON de textos e devolve uma lista JSON " +
+  "com a tradução de cada um, na mesma ordem e com a mesma quantidade de itens. Traduza de forma " +
+  "natural e fiel, sem resumir, explicar ou acrescentar nada. Mantenha nomes de marcas, produtos, " +
+  "pessoas e empresas como estão. Se um texto já estiver em português, devolva-o igual.";
+
 function responder(status, corpo) {
   return new Response(JSON.stringify(corpo), {
     status,
@@ -49,10 +64,105 @@ function origemPermitida(request, env) {
   return permitidas.length === 0 || permitidas.includes(request.headers.get("Origin"));
 }
 
+async function chamarGemini(env, corpo) {
+  // Devolve o texto da resposta, ou um Response de erro pronto para a extensão
+  const modelo = env.GEMINI_MODELO || MODELO_PADRAO;
+  const respostaGemini = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+      body: JSON.stringify(corpo),
+    }
+  );
+
+  const dados = await respostaGemini.json().catch(() => ({}));
+  if (!respostaGemini.ok) {
+    const motivo = (dados.error && dados.error.message) || `HTTP ${respostaGemini.status}`;
+    // 429 = cota do plano gratuito esgotada: repassa para a extensão avisar
+    return { erro: responder(respostaGemini.status === 429 ? 429 : 502, { erro: `Gemini: ${motivo}` }) };
+  }
+  const partes = (dados.candidates && dados.candidates[0] && dados.candidates[0].content &&
+    dados.candidates[0].content.parts) || [];
+  return { texto: partes.map((p) => p.text || "").join("").trim() };
+}
+
+async function descrever(pedido, env) {
+  const { imagem, tipo } = pedido || {};
+  const estilo = ESTILOS[pedido && pedido.detalhe] || ESTILOS.curto;
+  if (typeof imagem !== "string" || !imagem) return responder(400, { erro: "Campo 'imagem' ausente." });
+  if (!TIPOS_ACEITOS.includes(tipo)) return responder(400, { erro: `Tipo de imagem não aceito: ${tipo}` });
+  if (imagem.length > TAMANHO_MAX_BASE64) return responder(413, { erro: "Imagem grande demais." });
+
+  const { erro, texto } = await chamarGemini(env, {
+    systemInstruction: { parts: [{ text: estilo.instrucao }] },
+    contents: [
+      {
+        role: "user",
+        parts: [{ inline_data: { mime_type: tipo, data: imagem } }, { text: "Descreva esta imagem." }],
+      },
+    ],
+    generationConfig: {
+      maxOutputTokens: estilo.maxTokens,
+      // Resolução baixa: ~270 tokens por imagem em vez de ~1.100, com
+      // descrição praticamente igual para alt text
+      mediaResolution: "MEDIA_RESOLUTION_LOW",
+    },
+  });
+  if (erro) return erro;
+  if (!texto) return responder(502, { erro: "O Gemini não devolveu descrição." });
+  return responder(200, { descricao: texto });
+}
+
+async function traduzir(pedido, env) {
+  const textos = pedido && pedido.textos;
+  if (!Array.isArray(textos) || textos.length === 0 || !textos.every((t) => typeof t === "string")) {
+    return responder(400, { erro: "Campo 'textos' deve ser uma lista de textos." });
+  }
+  const caracteres = textos.reduce((soma, t) => soma + t.length, 0);
+  if (textos.length > MAX_TEXTOS || caracteres > MAX_CARACTERES) {
+    return responder(413, { erro: `No máximo ${MAX_TEXTOS} textos e ${MAX_CARACTERES} caracteres por pedido.` });
+  }
+  const origem = typeof pedido.origem === "string" ? pedido.origem.slice(0, 10) : "";
+
+  const { erro, texto } = await chamarGemini(env, {
+    systemInstruction: { parts: [{ text: INSTRUCAO_TRADUCAO }] },
+    contents: [
+      {
+        role: "user",
+        parts: [{ text: (origem ? `Idioma de origem: ${origem}.\n` : "") + JSON.stringify(textos) }],
+      },
+    ],
+    generationConfig: {
+      // Resposta em JSON garantida: uma lista de textos
+      responseMimeType: "application/json",
+      responseSchema: { type: "ARRAY", items: { type: "STRING" } },
+      // Português costuma ser um pouco mais longo que o inglês: ~1 token a
+      // cada 3 caracteres, com folga
+      maxOutputTokens: Math.min(8192, Math.ceil(caracteres / 2) + 256),
+    },
+  });
+  if (erro) return erro;
+
+  let traducoes;
+  try {
+    traducoes = JSON.parse(texto);
+  } catch {
+    return responder(502, { erro: "O Gemini não devolveu uma lista válida (resposta cortada?)." });
+  }
+  if (!Array.isArray(traducoes) || traducoes.length !== textos.length) {
+    return responder(502, { erro: "O Gemini devolveu uma quantidade diferente de traduções." });
+  }
+  return responder(200, { traducoes: traducoes.map(String) });
+}
+
+const ROTAS = { "/descrever": descrever, "/traduzir": traduzir };
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname !== "/descrever") return responder(404, { erro: "Rota não encontrada." });
+    const rota = ROTAS[url.pathname];
+    if (!rota) return responder(404, { erro: "Rota não encontrada." });
     if (request.method !== "POST") return responder(405, { erro: "Use POST." });
     if (!origemPermitida(request, env)) return responder(403, { erro: "Origem não permitida." });
     if (!env.GEMINI_API_KEY) return responder(500, { erro: "GEMINI_API_KEY não configurada no servidor." });
@@ -63,47 +173,6 @@ export default {
     } catch {
       return responder(400, { erro: "Corpo da requisição não é JSON válido." });
     }
-    const { imagem, tipo } = pedido || {};
-    const estilo = ESTILOS[pedido && pedido.detalhe] || ESTILOS.curto;
-    if (typeof imagem !== "string" || !imagem) return responder(400, { erro: "Campo 'imagem' ausente." });
-    if (!TIPOS_ACEITOS.includes(tipo)) return responder(400, { erro: `Tipo de imagem não aceito: ${tipo}` });
-    if (imagem.length > TAMANHO_MAX_BASE64) return responder(413, { erro: "Imagem grande demais." });
-
-    const modelo = env.GEMINI_MODELO || MODELO_PADRAO;
-    const respostaGemini = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: estilo.instrucao }] },
-          contents: [
-            {
-              role: "user",
-              parts: [{ inline_data: { mime_type: tipo, data: imagem } }, { text: "Descreva esta imagem." }],
-            },
-          ],
-          generationConfig: {
-            maxOutputTokens: estilo.maxTokens,
-            // Resolução baixa: ~270 tokens por imagem em vez de ~1.100, com
-            // descrição praticamente igual para alt text
-            mediaResolution: "MEDIA_RESOLUTION_LOW",
-          },
-        }),
-      }
-    );
-
-    const dados = await respostaGemini.json().catch(() => ({}));
-    if (!respostaGemini.ok) {
-      const motivo = (dados.error && dados.error.message) || `HTTP ${respostaGemini.status}`;
-      // 429 = cota do plano gratuito esgotada: repassa para a extensão avisar
-      return responder(respostaGemini.status === 429 ? 429 : 502, { erro: `Gemini: ${motivo}` });
-    }
-
-    const partes = (dados.candidates && dados.candidates[0] && dados.candidates[0].content &&
-      dados.candidates[0].content.parts) || [];
-    const descricao = partes.map((p) => p.text || "").join("").trim();
-    if (!descricao) return responder(502, { erro: "O Gemini não devolveu descrição." });
-    return responder(200, { descricao });
+    return rota(pedido, env);
   },
 };

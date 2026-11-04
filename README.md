@@ -94,6 +94,29 @@ pode ser desligada no ⚙ do painel.
 Gemini. No plano gratuito, o Google pode usá-las para melhorar os produtos
 dele. A extensão avisa isso nas configurações.
 
+## Tradução de páginas em outro idioma
+
+Páginas em inglês, espanhol ou qualquer outro idioma são traduzidas para o
+português antes da leitura, pelo mesmo [backend](backend/README.md) (rota
+`/traduzir`, Google Gemini).
+
+- **Idioma detectado pelo texto:** o Chrome identifica o idioma pelo próprio
+  conteúdo, sem internet. O `lang` do HTML só é usado quando ele não tem
+  certeza, porque muitos sites o deixam errado ou vazio. Páginas em
+  português não gastam nada.
+- **Economia:** a página vai em poucos pedidos (lotes de até 6.000
+  caracteres) e o mesmo texto não é traduzido duas vezes na sessão do
+  navegador. Texto custa bem menos que imagem: uma página inicial inteira
+  fica em poucos milhares de tokens.
+- **Sem tradução:** com a opção desligada no ⚙, ou se a tradução falhar, a
+  página é lida no idioma original com uma voz desse idioma (antes era lida
+  com voz em português, com sotaque). O motivo da falha aparece em letras
+  pequenas no painel.
+- **"↻ Ler a página de novo"** também descarta as traduções guardadas.
+
+**Privacidade:** o texto da página é enviado ao backend e ao Google Gemini.
+A extensão avisa isso nas configurações.
+
 ## Páginas HTML abertas do computador (`file:///`)
 
 Por segurança, o Chrome não deixa extensões lerem arquivos do computador
@@ -117,6 +140,7 @@ Alternativa sem mexer na permissão: abrir a pasta por um servidor local
   Readability.js (baseado em heurísticas de estrutura HTML, não metadados)
 - Divisão automática em seções navegáveis por heading
 - Leitor de voz nativo do navegador (Web Speech API), sem custo
+- Tradução automática para o português de páginas em outro idioma
 - Reestruturação opcional por IA, seção por seção
 - Navegação por teclado e painel com foco visível, pensado para uso com
   leitor de tela concorrente (NVDA/VoiceOver) sem duplicar leitura

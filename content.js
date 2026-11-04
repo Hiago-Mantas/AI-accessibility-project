@@ -278,6 +278,9 @@ if (!globalThis.leitorAcessivelCarregado) {
     if (msg.tipo === "EXTRACT_CONTENT") {
       try {
         const resultado = extrairConteudoPagina();
+        // Idioma declarado pela página (ex.: "en-US"): o painel confirma
+        // pelo próprio texto, porque muitos sites declaram errado ou nada
+        resultado.idioma = document.documentElement.lang || null;
         sendResponse(resultado);
       } catch (erro) {
         sendResponse({ ok: false, motivo: "Erro ao processar a página: " + erro.message });
