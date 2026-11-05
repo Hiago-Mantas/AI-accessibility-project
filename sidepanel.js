@@ -164,12 +164,17 @@ function iniciarExtracao() {
 
 async function reestruturarComIA() {
   for (let i = 0; i < secoes.length; i++) {
+    // Seção sem texto (só título ou só imagens): nada para reestruturar,
+    // não gasta uma chamada de IA
+    if (!secoes[i].texto || !secoes[i].texto.trim()) continue;
     el.textoCarregando.textContent = `Reestruturando com IA… (${i + 1}/${secoes.length})`;
     const resultado = await new Promise((resolve) => {
       chrome.runtime.sendMessage(
         {
           tipo: "CALL_LLM",
-          textoOriginal: (secoes[i].titulo ? secoes[i].titulo + ". " : "") + secoes[i].texto,
+          // Só o corpo: o título é falado à parte em lerSecaoAtual. Se fosse
+          // junto, a resposta já viria com ele e o título seria lido 2 vezes.
+          textoOriginal: secoes[i].texto,
           apiKey,
         },
         resolve
