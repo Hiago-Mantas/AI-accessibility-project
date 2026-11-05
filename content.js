@@ -56,22 +56,46 @@ function textoAlternativo(img) {
   return "";
 }
 
+// Tags que ficam "dentro da linha": o texto delas continua o bloco em volta
+// (sem espaço extra). As outras começam um bloco novo, separado por espaço.
+const TAGS_EM_LINHA = new Set([
+  "a", "abbr", "b", "bdi", "bdo", "cite", "code", "data", "dfn", "em", "i", "kbd",
+  "label", "mark", "q", "s", "samp", "small", "span", "strong", "sub", "sup",
+  "time", "u", "var", "font",
+]);
+const TAGS_SEM_TEXTO = new Set(["script", "style", "noscript", "template", "svg", "button", "select", "textarea"]);
+
+function blocoDe(no) {
+  let el = no.parentElement;
+  while (el && TAGS_EM_LINHA.has(el.tagName.toLowerCase())) el = el.parentElement;
+  return el;
+}
+
 function extrairSecoes(htmlLimpo) {
-  // Transforma o HTML já limpo pelo Readability em uma lista de seções
-  // usando os headings como pontos de corte. Isso permite navegação
-  // "próxima seção / seção anterior", igual leitores de tela tradicionais.
+  // Transforma o HTML limpo em uma lista de seções usando os headings como
+  // pontos de corte. Isso permite navegação "próxima seção / seção
+  // anterior", igual leitores de tela tradicionais.
   // DOMParser cria um documento "inerte": diferente de innerHTML, não faz o
   // navegador baixar de novo todas as imagens do artigo
   const container = new DOMParser().parseFromString(htmlLimpo, "text/html").body;
 
   const secoes = [];
   let atual = { titulo: null, textos: [], imagensSemAlt: [] };
+  // Texto do bloco que está sendo lido. Percorre TODOS os textos, não só
+  // <p> e <li>: sites de empresa põem muito conteúdo em <div> e <span>
+  // (cards, notícias, números), que antes eram pulados.
+  let pedaco = "";
+  let blocoDoPedaco = null;
 
-  const nos = Array.from(
-    container.querySelectorAll("h1, h2, h3, h4, p, li, blockquote, img")
-  );
+  function fecharPedaco() {
+    const texto = pedaco.replace(/\s+/g, " ").trim();
+    if (texto) atual.textos.push(texto);
+    pedaco = "";
+    blocoDoPedaco = null;
+  }
 
   function fecharSecao() {
+    fecharPedaco();
     if (atual.titulo || atual.textos.length || atual.imagensSemAlt.length) {
       secoes.push({
         titulo: atual.titulo,
@@ -81,17 +105,24 @@ function extrairSecoes(htmlLimpo) {
     }
   }
 
-  if (nos.length === 0) {
-    // fallback: sem estrutura nenhuma, pega o texto puro
-    const texto = container.textContent.trim();
-    if (texto) secoes.push({ titulo: null, texto, imagensSemAlt: [] });
-    return secoes;
-  }
+  const caminhante = document.createTreeWalker(container, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+  let no = caminhante.nextNode();
+  while (no) {
+    if (no.nodeType === Node.TEXT_NODE) {
+      const bloco = blocoDe(no);
+      if (bloco !== blocoDoPedaco) {
+        fecharPedaco();
+        blocoDoPedaco = bloco;
+      }
+      pedaco += no.data;
+      no = caminhante.nextNode();
+      continue;
+    }
 
-  for (const no of nos) {
     const tag = no.tagName.toLowerCase();
 
     if (tag === "img") {
+      fecharPedaco();
       const alt = textoAlternativo(no);
       if (alt) {
         // já tem alt text: só incorpora como texto, sem gastar chamada de IA
@@ -99,22 +130,30 @@ function extrairSecoes(htmlLimpo) {
       } else if (!imagemEhDecorativa(no) && no.src) {
         atual.imagensSemAlt.push(no.src);
       }
+    } else if (/^h[1-4]$/.test(tag)) {
+      const titulo = no.textContent.replace(/\s+/g, " ").trim();
+      if (titulo) {
+        fecharSecao();
+        atual = { titulo, textos: [], imagensSemAlt: [] };
+      }
+      no = pularFilhos(caminhante);
+      continue;
+    } else if (TAGS_SEM_TEXTO.has(tag)) {
+      no = pularFilhos(caminhante);
       continue;
     }
-
-    const texto = no.textContent.replace(/\s+/g, " ").trim();
-    if (!texto) continue;
-
-    if (/^h[1-4]$/.test(tag)) {
-      fecharSecao();
-      atual = { titulo: texto, textos: [], imagensSemAlt: [] };
-    } else {
-      atual.textos.push(texto);
-    }
+    no = caminhante.nextNode();
   }
   fecharSecao();
 
   return secoes;
+}
+
+function pularFilhos(caminhante) {
+  // Vai para o próximo nó depois deste elemento, sem entrar nos filhos dele
+  let proximo = caminhante.nextSibling();
+  while (!proximo && caminhante.parentNode()) proximo = caminhante.nextSibling();
+  return proximo;
 }
 
 const TAMANHO_MIN_IMAGEM_GALERIA = 150; // px na tela: ignora miniaturas e ícones
@@ -204,6 +243,68 @@ function imagemAbertaNaAba() {
   };
 }
 
+// Partes do site que se repetem em toda página (menus, rodapé, avisos de
+// cookies): ficam de fora da leitura da página inteira
+const FORA_DA_LEITURA = [
+  "nav", "aside", "footer", "form", "dialog", "iframe",
+  '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]',
+  '[role="complementary"]', '[role="dialog"]', '[role="alertdialog"]',
+  '[role="search"]', '[aria-hidden="true"]', "[hidden]",
+].join(",");
+
+// Se o Readability pegar menos que isso do texto visível do conteúdo
+// principal, ou dos títulos dele, escolheu só um pedaço (comum em páginas
+// iniciais de empresas, feitas de vários blocos curtos lado a lado)
+const COBERTURA_MINIMA = 0.5;
+const TITULOS_PARA_COMPARAR = 3; // com menos títulos que isso, vale só o texto
+
+function raizDoConteudo() {
+  return document.querySelector('main, [role="main"]') || document.body;
+}
+
+function copiaLimpaDaPaginaInteira() {
+  // Copia o conteúdo principal sem menus, rodapé e o que está escondido na
+  // tela. Na cópia o navegador não sabe o que está visível, então a
+  // conferência é feita na página de verdade, elemento por elemento (a cópia
+  // tem exatamente a mesma ordem de elementos)
+  const raiz = raizDoConteudo();
+  const copia = raiz.cloneNode(true);
+  const originais = raiz.querySelectorAll("*");
+  const copias = copia.querySelectorAll("*");
+  const remover = [];
+  for (let i = 0; i < originais.length; i++) {
+    const el = originais[i];
+    if (!el.checkVisibility({ visibilityProperty: true })) remover.push(copias[i]);
+  }
+  remover.forEach((el) => el.remove());
+  copia.querySelectorAll(FORA_DA_LEITURA).forEach((el) => el.remove());
+  // Sem <main>, o cabeçalho do site (logo e menu) também sai
+  if (raiz === document.body) copia.querySelectorAll("header").forEach((el) => el.remove());
+  return copia;
+}
+
+function normalizar(texto) {
+  return (texto || "").replace(/\s+/g, " ").trim();
+}
+
+function tamanhoDoTexto(texto) {
+  return normalizar(texto).length;
+}
+
+function coberturaDosTitulos(paginaInteira, artigo) {
+  // Quantos dos títulos da página o Readability manteve. O título principal
+  // ele tira do texto e devolve à parte (artigo.title), então conta também.
+  // Títulos que são só um link ("Leia também: ...") são chamadas para outras
+  // páginas: o Readability faz bem em tirar, então não entram na conta.
+  const titulos = Array.from(paginaInteira.querySelectorAll("h1, h2, h3, h4"))
+    .filter((h) => !h.closest("a") && normalizar(h.textContent) !== normalizar(Array.from(h.querySelectorAll("a")).map((a) => a.textContent).join(" ")))
+    .map((h) => normalizar(h.textContent))
+    .filter(Boolean);
+  if (titulos.length < TITULOS_PARA_COMPARAR) return 1;
+  const textoArtigo = normalizar(artigo.textContent) + " " + normalizar(artigo.title);
+  return titulos.filter((t) => textoArtigo.includes(t)).length / titulos.length;
+}
+
 function extrairConteudoPagina() {
   const imagemSozinha = imagemAbertaNaAba();
   if (imagemSozinha) return imagemSozinha;
@@ -213,25 +314,58 @@ function extrairConteudoPagina() {
   const reader = new Readability(clone, { charThreshold: 100 });
   const artigo = reader.parse();
 
-  if (!artigo || !artigo.content) {
-    // Sem texto de artigo (galerias, páginas só de fotos): em vez de desistir,
-    // lê as imagens que estão na tela
-    const galeria = extrairImagensVisiveis();
-    if (galeria) return galeria;
+  // O Readability foi feito para artigos: escolhe o maior bloco de texto e
+  // descarta o resto. Em páginas iniciais de empresas isso deixa de fora
+  // banners, cards e notícias. Compara com o texto e os títulos visíveis e,
+  // se ele pegou pouco, lê a página inteira.
+  const paginaInteira = copiaLimpaDaPaginaInteira();
+  const textoPagina = tamanhoDoTexto(paginaInteira.innerText || paginaInteira.textContent);
+  const textoArtigo = artigo && artigo.content ? tamanhoDoTexto(artigo.textContent) : 0;
+  const artigoCompleto =
+    textoArtigo > 0 &&
+    textoArtigo >= textoPagina * COBERTURA_MINIMA &&
+    coberturaDosTitulos(paginaInteira, artigo) >= COBERTURA_MINIMA;
+
+  if (artigoCompleto) {
     return {
-      ok: false,
-      motivo: "Não foi possível identificar um conteúdo principal legível nesta página.",
+      ok: true,
+      titulo: artigo.title || document.title,
+      autor: artigo.byline || null,
+      tempoLeituraMin: Math.max(1, Math.round((artigo.length || 0) / 1000)),
+      secoes: extrairSecoes(artigo.content),
     };
   }
 
-  const secoes = extrairSecoes(artigo.content);
+  if (textoPagina >= 100) {
+    const secoes = extrairSecoes(paginaInteira.innerHTML);
+    if (secoes.length) {
+      return {
+        ok: true,
+        titulo: (artigo && artigo.title) || document.title,
+        autor: (artigo && artigo.byline) || null,
+        tempoLeituraMin: Math.max(1, Math.round(textoPagina / 1000)),
+        secoes,
+      };
+    }
+  }
 
+  // Sem texto (galerias, páginas só de fotos): em vez de desistir, lê as
+  // imagens que estão na tela
+  const galeria = extrairImagensVisiveis();
+  if (galeria) return galeria;
+
+  if (textoArtigo > 0) {
+    return {
+      ok: true,
+      titulo: artigo.title || document.title,
+      autor: artigo.byline || null,
+      tempoLeituraMin: 1,
+      secoes: extrairSecoes(artigo.content),
+    };
+  }
   return {
-    ok: true,
-    titulo: artigo.title || document.title,
-    autor: artigo.byline || null,
-    tempoLeituraMin: Math.max(1, Math.round((artigo.length || 0) / 1000)),
-    secoes,
+    ok: false,
+    motivo: "Não foi possível identificar um conteúdo principal legível nesta página.",
   };
 }
 

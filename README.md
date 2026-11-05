@@ -115,6 +115,12 @@ Alternativa sem mexer na permissão: abrir a pasta por um servidor local
 
 - Extração de conteúdo robusta mesmo sem tags de SEO/schema, via
   Readability.js (baseado em heurísticas de estrutura HTML, não metadados)
+- Páginas iniciais de empresas e portais (vários blocos curtos: banner,
+  cards, notícias): o Readability foi feito para artigos e às vezes pega só
+  o maior bloco. Quando ele deixa de fora mais da metade do texto ou dos
+  títulos visíveis, a extensão lê o conteúdo principal inteiro, sem menu,
+  rodapé, avisos de cookies e partes escondidas
+- Texto em qualquer elemento (`<div>`, `<span>`), não só em parágrafos
 - Divisão automática em seções navegáveis por heading
 - Leitor de voz nativo do navegador (Web Speech API), sem custo
 - Reestruturação opcional por IA, seção por seção
