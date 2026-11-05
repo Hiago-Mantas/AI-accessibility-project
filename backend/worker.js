@@ -64,10 +64,19 @@ function origemPermitida(request, env) {
   return permitidas.length === 0 || permitidas.includes(request.headers.get("Origin"));
 }
 
-async function chamarGemini(env, corpo) {
-  // Devolve o texto da resposta, ou um Response de erro pronto para a extensão
-  const modelo = env.GEMINI_MODELO || MODELO_PADRAO;
-  const respostaGemini = await fetch(
+// Quando o modelo principal está sobrecarregado ("high demand") ou com a cota
+// do dia esgotada, tenta estes, nesta ordem. Cada modelo tem fila e cota
+// próprias no plano gratuito do Gemini.
+const MODELOS_RESERVA_PADRAO = "gemini-3.1-flash-lite,gemini-2.5-flash-lite";
+const TENTATIVAS_POR_MODELO = 2;
+const ESPERA_ENTRE_TENTATIVAS_MS = 1000;
+
+function esperar(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function pedirAoModelo(env, modelo, corpo) {
+  const resposta = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`,
     {
       method: "POST",
@@ -75,16 +84,41 @@ async function chamarGemini(env, corpo) {
       body: JSON.stringify(corpo),
     }
   );
+  const dados = await resposta.json().catch(() => ({}));
+  return { status: resposta.status, ok: resposta.ok, dados };
+}
 
-  const dados = await respostaGemini.json().catch(() => ({}));
-  if (!respostaGemini.ok) {
-    const motivo = (dados.error && dados.error.message) || `HTTP ${respostaGemini.status}`;
-    // 429 = cota do plano gratuito esgotada: repassa para a extensão avisar
-    return { erro: responder(respostaGemini.status === 429 ? 429 : 502, { erro: `Gemini: ${motivo}` }) };
+async function chamarGemini(env, corpo) {
+  // Devolve o texto da resposta, ou um Response de erro pronto para a extensão
+  const modelos = [env.GEMINI_MODELO || MODELO_PADRAO].concat(
+    (env.GEMINI_MODELOS_RESERVA ?? MODELOS_RESERVA_PADRAO).split(",").map((m) => m.trim()).filter(Boolean)
+  );
+
+  let ultimaFalha = null;
+  for (const modelo of [...new Set(modelos)]) {
+    for (let tentativa = 1; tentativa <= TENTATIVAS_POR_MODELO; tentativa++) {
+      const { status, ok, dados } = await pedirAoModelo(env, modelo, corpo);
+      if (ok) {
+        const partes = (dados.candidates && dados.candidates[0] && dados.candidates[0].content &&
+          dados.candidates[0].content.parts) || [];
+        return { texto: partes.map((p) => p.text || "").join("").trim() };
+      }
+      ultimaFalha = { status, motivo: `${modelo}: ${(dados.error && dados.error.message) || `HTTP ${status}`}` };
+      // 429 = cota do modelo esgotada: tentar de novo não adianta, vai para o próximo
+      if (status === 429) break;
+      // 500/503 = sobrecarga passageira do Google: espera e tenta de novo
+      if (status === 500 || status === 503) {
+        if (tentativa < TENTATIVAS_POR_MODELO) await esperar(ESPERA_ENTRE_TENTATIVAS_MS * tentativa);
+        continue;
+      }
+      // Outros erros (pedido inválido, chave errada) seriam iguais em
+      // qualquer modelo: devolve logo
+      return { erro: responder(502, { erro: `Gemini: ${ultimaFalha.motivo}` }) };
+    }
   }
-  const partes = (dados.candidates && dados.candidates[0] && dados.candidates[0].content &&
-    dados.candidates[0].content.parts) || [];
-  return { texto: partes.map((p) => p.text || "").join("").trim() };
+  // 429 = cota esgotada em todos: repassa para a extensão avisar
+  const codigo = ultimaFalha && ultimaFalha.status === 429 ? 429 : 503;
+  return { erro: responder(codigo, { erro: `Gemini indisponível no momento (${ultimaFalha && ultimaFalha.motivo}). Tente de novo em alguns minutos.` }) };
 }
 
 async function descrever(pedido, env) {

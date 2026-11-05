@@ -97,6 +97,7 @@ para o publicado depois). Deixe o terminal aberto enquanto testa.
 | Variável | Para que serve |
 |---|---|
 | `GEMINI_MODELO` | Modelo usado. Padrão: `gemini-3.5-flash-lite`. |
+| `GEMINI_MODELOS_RESERVA` | Modelos tentados, nesta ordem, quando o principal está sobrecarregado ("high demand") ou sem cota. Padrão: `gemini-3.1-flash-lite,gemini-2.5-flash-lite`. |
 | `ORIGENS_PERMITIDAS` | IDs de extensão aceitos, separados por vírgula. Vazio = aceita tudo (só para testes). |
 | `GEMINI_API_KEY` | **Segredo.** Nunca no arquivo: use `wrangler secret put` ou o `.dev.vars`. |
 
@@ -134,6 +135,15 @@ extensão sempre sabe qual tradução é de qual trecho.
 | `413` | Mais de 60 textos ou 12.000 caracteres num pedido (a extensão manda lotes menores) |
 | `429` | Cota do plano gratuito do Gemini esgotada |
 | `502` | O Gemini falhou, cortou a resposta ou devolveu uma quantidade diferente de traduções |
+
+## Quando o Gemini está sobrecarregado
+
+Às vezes o Google responde "This model is currently experiencing high
+demand". O backend espera 1 segundo e tenta de novo; se continuar, passa
+para os modelos reserva. Quando a cota do dia de um modelo acaba (erro
+429), também passa para o próximo, porque cada modelo tem cota própria no
+plano gratuito. Só se todos falharem a extensão lê a página no idioma
+original e mostra o motivo no painel.
 
 ## Limitações conhecidas
 
