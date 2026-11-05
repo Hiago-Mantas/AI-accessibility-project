@@ -6,6 +6,7 @@ const el = {
   inputApiKey: document.getElementById("input-api-key"),
   inputDescreverImagens: document.getElementById("input-descrever-imagens"),
   inputDescricaoDetalhada: document.getElementById("input-descricao-detalhada"),
+  inputTraduzir: document.getElementById("input-traduzir"),
   btnSalvarKey: document.getElementById("btn-salvar-key"),
 
   estadoInicial: document.getElementById("estado-inicial"),
@@ -39,7 +40,9 @@ let falando = false;
 let apiKey = null;
 let descreverImagens = true; // descrever imagens sem alt pelo backend (Gemini)
 let descricaoDetalhada = false; // padrão: uma frase curta por imagem
-let errosDescricao = []; // motivos técnicos das falhas, mostrados (não falados) no painel
+let traduzirPaginas = true; // traduzir para o português páginas em outro idioma
+let idiomaLeitura = "pt-BR"; // idioma da voz: o da página quando ela não é traduzida
+let errosDescricao = []; // motivos técnicos das falhas (descrição e tradução), mostrados (não falados) no painel
 let geracaoFala = 0; // incrementa a cada nova leitura/parada: invalida callbacks de falas canceladas
 let utteranceAtual = null; // referência viva evita que o Chrome descarte a fala e nunca dispare onend
 
@@ -59,7 +62,7 @@ function mostrarEstado(nome) {
 
 // ---------- configuração da chave de API ----------
 
-chrome.storage.local.get(["anthropicApiKey", "descreverImagens", "descricaoDetalhada"], (dados) => {
+chrome.storage.local.get(["anthropicApiKey", "descreverImagens", "descricaoDetalhada", "traduzirPaginas"], (dados) => {
   if (dados.anthropicApiKey) {
     apiKey = dados.anthropicApiKey;
     el.inputApiKey.value = dados.anthropicApiKey;
@@ -68,6 +71,8 @@ chrome.storage.local.get(["anthropicApiKey", "descreverImagens", "descricaoDetal
   el.inputDescreverImagens.checked = descreverImagens;
   descricaoDetalhada = Boolean(dados.descricaoDetalhada);
   el.inputDescricaoDetalhada.checked = descricaoDetalhada;
+  traduzirPaginas = dados.traduzirPaginas !== false; // ligado por padrão
+  el.inputTraduzir.checked = traduzirPaginas;
 });
 
 el.btnConfig.addEventListener("click", () => {
@@ -80,7 +85,8 @@ el.btnSalvarKey.addEventListener("click", () => {
   apiKey = el.inputApiKey.value.trim() || null;
   descreverImagens = el.inputDescreverImagens.checked;
   descricaoDetalhada = el.inputDescricaoDetalhada.checked;
-  chrome.storage.local.set({ anthropicApiKey: apiKey, descreverImagens, descricaoDetalhada });
+  traduzirPaginas = el.inputTraduzir.checked;
+  chrome.storage.local.set({ anthropicApiKey: apiKey, descreverImagens, descricaoDetalhada, traduzirPaginas });
   el.painelConfig.classList.add("oculto");
   el.btnConfig.setAttribute("aria-expanded", "false");
 });
@@ -92,14 +98,15 @@ el.btnTentarDeNovo.addEventListener("click", iniciarExtracao);
 el.btnLerDeNovo.addEventListener("click", lerDeNovo);
 
 let imagensDaPagina = []; // endereços das imagens sem alt da última leitura
+let textosDaPagina = []; // textos originais enviados para tradução na última leitura
 
 async function lerDeNovo() {
   // Descarta as descrições guardadas das imagens desta página (nos dois
-  // estilos, curto e detalhado) para a IA descrevê-las outra vez, e extrai
-  // a página de novo (ela pode ter mudado desde a última leitura)
-  const chaves = imagensDaPagina.flatMap((src) =>
-    ["curto", "detalhado"].map((detalhe) => `descricao:${detalhe}:${src}`)
-  );
+  // estilos, curto e detalhado) e as traduções, para a IA fazer tudo outra
+  // vez, e extrai a página de novo (ela pode ter mudado desde a última leitura)
+  const chaves = imagensDaPagina
+    .flatMap((src) => ["curto", "detalhado"].map((detalhe) => `descricao:${detalhe}:${src}`))
+    .concat(textosDaPagina.map((texto) => `traducao:${texto}`));
   if (chaves.length) await chrome.storage.session.remove(chaves);
   iniciarExtracao();
 }
@@ -120,6 +127,7 @@ function iniciarExtracao() {
     // Mantém por enquanto as seções que só têm imagens: elas ganham texto
     // na etapa de descrição e só depois as vazias são descartadas
     errosDescricao = [];
+    textosDaPagina = [];
     imagensDaPagina = resposta.secoes.flatMap((s) => s.imagensSemAlt || []);
     secoes = resposta.secoes.filter(
       (s) => (s.texto && s.texto.length > 0) || (s.imagensSemAlt && s.imagensSemAlt.length > 0)
@@ -129,6 +137,16 @@ function iniciarExtracao() {
       el.textoErro.textContent = "Nenhum conteúdo legível foi encontrado nesta página.";
       mostrarEstado("estadoErro");
       return;
+    }
+
+    // Traduz antes do resto: a reestruturação e as descrições de imagem já
+    // saem em português
+    idiomaLeitura = "pt-BR";
+    const idioma = await detectarIdioma(resposta);
+    let traduzida = false;
+    if (idioma !== "pt") {
+      if (traduzirPaginas && URL_BACKEND) traduzida = await traduzirPagina(resposta, idioma);
+      if (!traduzida) idiomaLeitura = idioma; // lê no original, com voz do idioma
     }
 
     if (apiKey) await reestruturarComIA();
@@ -142,6 +160,7 @@ function iniciarExtracao() {
     el.metaArtigo.textContent = [
       resposta.autor,
       `~${resposta.tempoLeituraMin} min de leitura`,
+      traduzida ? `traduzido do ${nomeDoIdioma(idioma)}` : idioma !== "pt" ? `lido em ${nomeDoIdioma(idioma)}` : null,
       apiKey ? "reestruturado por IA" : "texto original",
       usarIA ? "imagens sem alt descritas por IA" : null,
     ]
@@ -160,6 +179,58 @@ function iniciarExtracao() {
       `Conteúdo carregado: ${resposta.titulo}. ${secoes.length} ${secoes.length === 1 ? "seção" : "seções"}.`
     );
   });
+}
+
+// ---------- tradução ----------
+
+function detectarIdioma(resposta) {
+  // O Chrome identifica o idioma pelo próprio texto, sem internet. O "lang"
+  // do HTML só é usado se ele não tiver certeza: muitos sites o deixam
+  // errado (ex.: "en" em página em português) ou vazio.
+  const declarado = (resposta.idioma || "").split("-")[0].toLowerCase() || null;
+  const amostra = [resposta.titulo, ...secoes.map((s) => `${s.titulo || ""} ${s.texto || ""}`)]
+    .join(" ")
+    .slice(0, 4000);
+  return new Promise((resolve) => {
+    if (!chrome.i18n.detectLanguage || amostra.trim().length < 20) return resolve(declarado || "pt");
+    chrome.i18n.detectLanguage(amostra, (resultado) => {
+      const melhor = resultado && resultado.languages && resultado.languages[0];
+      if (resultado && resultado.isReliable && melhor && melhor.language !== "und") {
+        resolve(melhor.language.split("-")[0].toLowerCase());
+      } else {
+        resolve(declarado || "pt");
+      }
+    });
+  });
+}
+
+function nomeDoIdioma(codigo) {
+  try {
+    return new Intl.DisplayNames(["pt-BR"], { type: "language" }).of(codigo).toLowerCase();
+  } catch {
+    return codigo;
+  }
+}
+
+async function traduzirPagina(resposta, idioma) {
+  el.textoCarregando.textContent = `Traduzindo a página do ${nomeDoIdioma(idioma)} para o português…`;
+  // Tudo num pedido só (o background divide em lotes): título da página e,
+  // de cada seção, o título e o texto, nesta ordem
+  const textos = [resposta.titulo || "", ...secoes.flatMap((s) => [s.titulo || "", s.texto || ""])];
+  const resultado = await pedirDescricao({ tipo: "TRADUZIR", textos, origem: idioma });
+  if (!resultado || !resultado.ok) {
+    // Sem tradução a página ainda é lida, no idioma original
+    errosDescricao.push(`[tradução] ${(resultado && resultado.motivo) || "sem resposta do background"}`);
+    return false;
+  }
+  textosDaPagina = textos.filter((t) => t.trim());
+  const [titulo, ...resto] = resultado.traducoes;
+  resposta.titulo = titulo;
+  secoes.forEach((secao, i) => {
+    if (secao.titulo) secao.titulo = resto[2 * i];
+    secao.texto = resto[2 * i + 1];
+  });
+  return true;
 }
 
 async function reestruturarComIA() {
@@ -297,7 +368,7 @@ function montarListaSecoes() {
 function mostrarDiagnostico() {
   const unicos = [...new Set(errosDescricao)];
   el.diagnostico.textContent = unicos.length
-    ? `Detalhes técnicos da falha na descrição: ${unicos.join(" | ")}`
+    ? `Detalhes técnicos das falhas: ${unicos.join(" | ")}`
     : "";
   el.diagnostico.classList.toggle("oculto", unicos.length === 0);
 }
@@ -410,7 +481,7 @@ function lerSecaoAtual() {
     }
 
     const utter = new SpeechSynthesisUtterance(trechos[proximo++]);
-    utter.lang = "pt-BR";
+    utter.lang = idiomaLeitura;
     // lida a cada trecho: mudar a velocidade vale a partir da próxima frase
     utter.rate = Number(el.inputVelocidade.value);
     utter.onend = falarProximoTrecho;
