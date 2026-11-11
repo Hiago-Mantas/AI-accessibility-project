@@ -1,6 +1,6 @@
 // background.js (service worker)
 
-importScripts("config.js"); // URL_BACKEND
+importScripts("config.js", "fala.js", "leitura-fundo.js"); // URL_BACKEND, dividirEmTrechos, leitura com o painel fechado
 
 chrome.action.onClicked.addListener((tab) => {
   chrome.sidePanel.open({ tabId: tab.id });
@@ -11,11 +11,14 @@ chrome.action.onClicked.addListener((tab) => {
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 
 // Alt+Shift+K: pausa ou continua a leitura sem precisar levar o foco até o
-// painel (útil com a leitura automática, enquanto a pessoa navega na página)
-chrome.commands.onCommand.addListener((comando) => {
-  if (comando === "alternar-leitura") {
-    // Com o painel fechado ninguém recebe a mensagem: ignora o erro
+// painel (útil com a leitura automática, enquanto a pessoa navega na página).
+// Com o painel fechado, quem responde é a leitura de fundo (leitura-fundo.js).
+chrome.commands.onCommand.addListener((comando, tab) => {
+  if (comando !== "alternar-leitura") return;
+  if (tab && painelAbertoNaJanela(tab.windowId)) {
     chrome.runtime.sendMessage({ tipo: "ALTERNAR_LEITURA" }).catch(() => {});
+  } else {
+    alternarLeituraDeFundo(tab);
   }
 });
 

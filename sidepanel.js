@@ -8,6 +8,7 @@ const el = {
   inputDescricaoDetalhada: document.getElementById("input-descricao-detalhada"),
   inputTraduzir: document.getElementById("input-traduzir"),
   inputLerAutomaticamente: document.getElementById("input-ler-automaticamente"),
+  inputLerSemPainel: document.getElementById("input-ler-sem-painel"),
   btnSalvarKey: document.getElementById("btn-salvar-key"),
 
   estadoInicial: document.getElementById("estado-inicial"),
@@ -65,7 +66,7 @@ function mostrarEstado(nome) {
 // ---------- configuração da chave de API ----------
 
 const configuracaoCarregada = new Promise((pronto) => chrome.storage.local.get(
-  ["anthropicApiKey", "descreverImagens", "descricaoDetalhada", "traduzirPaginas", "lerAutomaticamente"],
+  ["anthropicApiKey", "descreverImagens", "descricaoDetalhada", "traduzirPaginas", "lerAutomaticamente", "lerSemPainel", "velocidade"],
   (dados) => {
   if (dados.anthropicApiKey) {
     apiKey = dados.anthropicApiKey;
@@ -79,6 +80,11 @@ const configuracaoCarregada = new Promise((pronto) => chrome.storage.local.get(
   el.inputTraduzir.checked = traduzirPaginas;
   lerAutomaticamente = dados.lerAutomaticamente !== false; // ligado por padrão
   el.inputLerAutomaticamente.checked = lerAutomaticamente;
+  el.inputLerSemPainel.checked = dados.lerSemPainel !== false; // protótipo: ligado por padrão
+  if (dados.velocidade) {
+    el.inputVelocidade.value = dados.velocidade;
+    el.valorVelocidade.textContent = `${Number(dados.velocidade).toFixed(1)}×`;
+  }
   pronto();
 }));
 
@@ -94,7 +100,10 @@ el.btnSalvarKey.addEventListener("click", () => {
   descricaoDetalhada = el.inputDescricaoDetalhada.checked;
   traduzirPaginas = el.inputTraduzir.checked;
   lerAutomaticamente = el.inputLerAutomaticamente.checked;
-  chrome.storage.local.set({ anthropicApiKey: apiKey, descreverImagens, descricaoDetalhada, traduzirPaginas, lerAutomaticamente });
+  chrome.storage.local.set({
+    anthropicApiKey: apiKey, descreverImagens, descricaoDetalhada, traduzirPaginas, lerAutomaticamente,
+    lerSemPainel: el.inputLerSemPainel.checked, // usado pela leitura de fundo (leitura-fundo.js)
+  });
   el.painelConfig.classList.add("oculto");
   el.btnConfig.setAttribute("aria-expanded", "false");
 });
@@ -179,8 +188,19 @@ chrome.runtime.onMessage.addListener((msg) => {
 // Ao abrir o painel (clique no ícone ou Alt+Shift+L), já lê a página atual.
 // O Chrome não deixa extensões abrirem o painel sozinhas: é preciso um
 // clique ou atalho, então "iniciar com o navegador" começa por aqui.
+function conectarAoBackground() {
+  // Avisa o background que o painel desta janela está aberto: a leitura de
+  // fundo (painel fechado) se cala e deixa o painel ler. A conexão cai
+  // sozinha quando o painel fecha; se cair porque o background foi
+  // reiniciado pelo Chrome, reconecta.
+  const porta = chrome.runtime.connect({ name: "painel" });
+  porta.postMessage({ windowId: minhaJanela });
+  porta.onDisconnect.addListener(() => setTimeout(conectarAoBackground, 500));
+}
+
 Promise.all([configuracaoCarregada, chrome.windows.getCurrent()]).then(([, janela]) => {
   minhaJanela = janela.id;
+  conectarAoBackground();
   if (lerAutomaticamente) pedirLeitura({ automatico: true });
 });
 
@@ -506,6 +526,8 @@ el.inputVelocidade.addEventListener("input", () => {
 // A página inteira já está na fila da voz com a velocidade antiga: ao soltar
 // o controle, refaz a fila a partir do trecho atual com a nova velocidade
 el.inputVelocidade.addEventListener("change", () => {
+  // Guarda para a próxima vez e para a leitura com o painel fechado
+  chrome.storage.local.set({ velocidade: Number(el.inputVelocidade.value) });
   if (falando) lerSecaoAtual(trechoAtual);
 });
 
@@ -526,35 +548,6 @@ function pararLeitura() {
   chrome.tts.stop();
   el.btnPlayPause.textContent = "▶ Ler";
   el.btnPlayPause.setAttribute("aria-label", "Reproduzir leitura");
-}
-
-const TAMANHO_MAX_TRECHO = 500;
-
-function dividirEmTrechos(texto) {
-  // A seção é lida em trechos, quebrando no fim das frases: assim pausar e
-  // continuar volta ao trecho em que parou, e não ao começo da seção.
-  const frases = texto.match(/[^.!?…]+(?:[.!?…]+["')\]]*|$)\s*/g) || [texto];
-  const trechos = [];
-  let atual = "";
-
-  function empurrar(pedaco) {
-    if ((atual + pedaco).length > TAMANHO_MAX_TRECHO && atual) {
-      trechos.push(atual.trim());
-      atual = "";
-    }
-    atual += pedaco;
-  }
-
-  for (const frase of frases) {
-    if (frase.length <= TAMANHO_MAX_TRECHO) {
-      empurrar(frase);
-    } else {
-      // frase gigante (ex: lista sem pontuação): quebra por palavras
-      for (const palavra of frase.split(/(?<=\s)/)) empurrar(palavra);
-    }
-  }
-  if (atual.trim()) trechos.push(atual.trim());
-  return trechos;
 }
 
 function lerSecaoAtual(trechoInicial = 0) {
