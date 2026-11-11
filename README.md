@@ -1,188 +1,314 @@
-# Leitor Acessível com IA — protótipo
+# 🔊 Leitor Acessível com IA
+
+> Extensão para o Google Chrome que lê qualquer página da web em voz alta,
+> descreve com IA as imagens sem texto alternativo e traduz páginas em
+> outro idioma para o português.
 
 [![Baixar o Leitor Acessível (.zip)](https://img.shields.io/badge/Baixar-Leitor%20Acess%C3%ADvel%20%28.zip%29-2ea44f?style=for-the-badge&logo=github)](https://github.com/Hiago-Mantas/AI-accessibility-project/archive/refs/heads/main.zip)
 
-<sub>Baixa a versão mais recente do branch `main` (extensão + backend).</sub>
+<sub>Baixa a versão mais recente do branch `main` (extensão + backend). Veja [Como instalar](#-como-instalar).</sub>
 
-Extensão de navegador (Manifest V3, Chrome/Edge) que extrai o conteúdo
-principal de qualquer página — usando a mesma engine do Firefox Reader View
-(Readability.js) — e lê em voz alta, seção por seção, com navegação por
-teclado. Opcionalmente, reestrutura o texto com um modelo de IA (Claude)
-antes de narrar, para lidar melhor com páginas mal organizadas.
+Projeto individual da disciplina **Projetos (Engenharia de Software)**.
 
-## Como instalar (modo desenvolvedor)
+## 📑 Sumário
 
-1. Clique no botão **Baixar** acima e descompacte o arquivo. Vai aparecer a
-   pasta `AI-accessibility-project-main`
-2. Abra `chrome://extensions` (ou `edge://extensions`)
-3. Ative o "Modo do desenvolvedor" (canto superior direito)
-4. Clique em "Carregar sem compactação" e selecione a pasta
-   `AI-accessibility-project-main`
-5. Clique no ícone da extensão em qualquer página para abrir o painel lateral
+- [Problema](#-problema)
+- [Solução](#-solução)
+- [Público-alvo e impacto social](#-público-alvo-e-impacto-social)
+- [Funcionalidades](#-funcionalidades)
+- [Arquitetura e funcionamento](#-arquitetura-e-funcionamento)
+- [Tecnologias](#-tecnologias)
+- [Como instalar](#-como-instalar)
+- [Como usar](#-como-usar)
+- [Configurações](#-configurações)
+- [Estrutura do repositório](#-estrutura-do-repositório)
+- [Gestão do projeto no GitHub](#-gestão-do-projeto-no-github)
+- [Privacidade e segurança](#-privacidade-e-segurança)
+- [Limitações conhecidas e próximos passos](#-limitações-conhecidas-e-próximos-passos)
+- [Status](#-status)
+- [Equipe](#-equipe)
+- [Referências](#-referências)
 
-A descrição de imagens já funciona: a extensão usa o backend publicado na
-Cloudflare, sem precisar abrir terminal nem configurar chave. Detalhes em
+## 🎯 Problema
+
+Pessoas cegas, com baixa visão ou com dificuldade de leitura dependem de
+leitores de tela, mas grande parte da web não foi feita pensando nelas:
+
+- **Páginas mal estruturadas:** muitos sites não usam títulos e marcações
+  corretas, e o leitor de tela lê menus, banners e avisos misturados com o
+  conteúdo principal.
+- **Imagens sem texto alternativo (`alt`):** fotos, gráficos e cartazes sem
+  descrição viram apenas "imagem" para quem não enxerga, e a informação se
+  perde.
+- **Páginas em outro idioma:** um conteúdo em inglês lido por uma voz em
+  português fica incompreensível, e quem não conhece o idioma fica de fora.
+- **Ferramentas pagas ou complexas:** soluções completas costumam exigir
+  instalação, configuração ou assinatura.
+
+## 💡 Solução
+
+Uma extensão gratuita para o Chrome que, com um clique ou um atalho:
+
+1. **Extrai o conteúdo principal** da página (com o Readability.js, o mesmo
+   mecanismo do "Modo leitura" do Firefox), descartando menus, rodapés e
+   anúncios, e divide o texto em seções navegáveis.
+2. **Lê em voz alta**, seção por seção, sem pausas, com controles por
+   teclado.
+3. **Usa o `alt` das imagens primeiro** e só pede à IA (Google Gemini) a
+   descrição das imagens que não têm texto alternativo.
+4. **Traduz para o português** páginas em outro idioma antes de ler.
+5. **Acompanha a leitura na tela:** o trecho lido fica destacado e a página
+   rola junto; se a pessoa rolar a página, a leitura pula para o que está
+   na tela.
+
+A chave da IA fica num backend próprio (Cloudflare Workers), nunca dentro
+da extensão: qualquer pessoa pode baixar e usar sem configurar nada.
+
+## 🤝 Público-alvo e impacto social
+
+- **Pessoas cegas ou com baixa visão**, que ganham acesso à informação das
+  imagens sem alt e a uma leitura limpa do conteúdo principal.
+- **Pessoas com dislexia, TDAH ou baixa escolaridade**, que acompanham o
+  texto ouvindo e vendo o trecho destacado.
+- **Idosos** e pessoas com pouca familiaridade com tecnologia: a leitura
+  começa sozinha ao abrir o painel.
+- **Quem não lê em outros idiomas**, que passa a ouvir em português sites
+  em inglês, espanhol e outros.
+
+Segundo o IBGE, o Brasil tem 14,4 milhões de pessoas com deficiência, e a
+mais frequente é a dificuldade para enxergar, mesmo com óculos: cerca de
+7,9 milhões de pessoas (Censo 2022, resultados preliminares). A ferramenta
+é gratuita, de código aberto e funciona em qualquer site, sem depender de
+o site ter sido feito de forma acessível.
+
+## ✨ Funcionalidades
+
+| Funcionalidade | Descrição |
+|---|---|
+| 📄 Extração do conteúdo | Readability.js; em páginas iniciais de empresas e portais (vários blocos curtos), lê o conteúdo principal inteiro quando o Readability pega só uma parte |
+| 🗂️ Seções navegáveis | O texto é dividido pelos títulos da página; navegação por botões, lista ou setas do teclado |
+| 🔊 Leitura sem pausas | A página inteira entra na fila da voz do sistema (`chrome.tts`) |
+| 🖼️ Descrição de imagens | `alt` primeiro; imagens sem alt são descritas pelo Gemini (até 8 por página), ícones e imagens decorativas são ignorados; funciona com SVG, galerias e carrosséis |
+| 🌎 Tradução | Detecta o idioma pelo próprio texto e traduz para o português; sem tradução, lê com uma voz do idioma original |
+| ▶️ Leitura automática | Ao abrir o painel e a cada página aberta, a leitura começa sozinha |
+| 🙈 Leitura com o painel fechado | Lê as páginas mesmo sem abrir o painel, desde a abertura do navegador |
+| 🖍️ Página e áudio juntos | O parágrafo lido fica destacado e a página rola até ele; rolar a página leva a leitura para o que está na tela |
+| ⌨️ Atalhos | Alt+Shift+L abre o painel, Alt+Shift+K pausa/continua de qualquer lugar |
+| ✍️ Reestruturação por IA (opcional) | Com uma chave da Anthropic, o texto de cada seção é reescrito em frases mais claras |
+| 📁 Arquivos locais | Lê arquivos `.html` abertos do computador (`file:///`) |
+
+## 🧩 Arquitetura e funcionamento
+
+O projeto tem duas partes: a **extensão** (roda no navegador da pessoa) e o
+**backend** (roda na Cloudflare e guarda a chave do Gemini).
+
+### Diagrama 1: Arquitetura (componentes)
+
+As partes do sistema e como elas se comunicam.
+
+[![Arquitetura do Leitor Acessível](docs/diagramas/arquitetura.png)](docs/diagramas/arquitetura.png)
+
+<sub>Clique na imagem para ver em tamanho real.</sub>
+
+| Componente | Arquivos | Papel |
+|---|---|---|
+| Script da página | `content.js`, `readability.js` | Único que enxerga o HTML: extrai o texto, liga cada trecho ao elemento da página, destaca e rola, avisa quando a pessoa rola |
+| Painel lateral | `sidepanel.html`, `sidepanel.js`, `sidepanel.css` | Interface (botões, seções, ⚙); com o painel aberto, organiza a leitura |
+| Service worker | `background.js`, `leitura-fundo.js`, `fala.js` | Ponte entre painel e página, baixa e reduz imagens, tradução em lotes com cache, leitura com o painel fechado, atalhos |
+| Backend | `backend/worker.js` | Rotas `POST /descrever` e `POST /traduzir`; guarda a chave do Gemini; tenta modelos reserva se um falhar |
+
+### Diagrama 2: Sequência de uma leitura
+
+O passo a passo de uma página em inglês com uma imagem sem `alt`, do
+clique até a voz.
+
+[![Sequência de uma leitura](docs/diagramas/sequencia.png)](docs/diagramas/sequencia.png)
+
+<sub>Clique na imagem para ver em tamanho real.</sub>
+
+Pontos principais do fluxo:
+
+1. **Alt primeiro:** imagens com texto alternativo viram texto na própria
+   página e não gastam IA.
+2. **Economia de tokens:** tradução em lotes e com cache; imagens reduzidas
+   (até 768 px) e enviadas em resolução baixa; no máximo 8 imagens por página.
+3. **Falhas não travam a leitura:** sem tradução, a página é lida no idioma
+   original; sem descrição, a leitura avisa "Imagem sem descrição".
+
+O código dos diagramas (Mermaid) e mais detalhes estão em
+[docs/diagramas.md](docs/diagramas.md).
+
+## 🧰 Tecnologias
+
+| Camada | Tecnologia |
+|---|---|
+| Extensão | JavaScript, HTML e CSS, Chrome Extensions **Manifest V3** (painel lateral, service worker, content scripts) |
+| Extração de conteúdo | [Readability.js](https://github.com/mozilla/readability) (Mozilla) |
+| Voz | `chrome.tts` (vozes do sistema operacional) |
+| Idioma | `chrome.i18n.detectLanguage` (detecção sem internet) |
+| Armazenamento | `chrome.storage` (configurações e cache da sessão), sem banco de dados |
+| Backend | [Cloudflare Workers](https://workers.cloudflare.com/) (JavaScript, plano gratuito) |
+| IA | [Google Gemini API](https://ai.google.dev/) (`gemini-3.5-flash-lite`, com modelos reserva) |
+| IA opcional | API da Anthropic (reestruturação do texto, com a chave da própria pessoa) |
+| Ferramentas | Git e GitHub, Wrangler (deploy do backend), Playwright + Chromium (testes automatizados durante o desenvolvimento) |
+
+## 📥 Como instalar
+
+Não é preciso terminal nem chave de API: a extensão já usa o backend
+publicado.
+
+1. Clique no botão **Baixar** no topo desta página e descompacte o arquivo.
+   Vai aparecer a pasta `AI-accessibility-project-main`.
+2. No Chrome, abra `chrome://extensions` (no Edge, `edge://extensions`).
+3. Ligue o **Modo do desenvolvedor** (canto superior direito).
+4. Clique em **Carregar sem compactação** e escolha a pasta
+   `AI-accessibility-project-main`.
+5. Abra qualquer página e clique no ícone da extensão (ou use
+   **Alt+Shift+L**).
+
+Para rodar ou publicar o seu próprio backend, veja
 [backend/README.md](backend/README.md).
 
-## Como usar
+## 🎧 Como usar
 
-- Abra o painel clicando no ícone da extensão ou com **Alt+Shift+L**.
-  A página atual começa a ser lida sozinha.
-- **Leitura automática** (ligada por padrão, no ⚙): com o painel aberto,
-  cada página que você abrir, recarregar ou trocar de aba é lida sozinha,
-  sem tirar o foco da página. Ao sair de uma página, a voz para na hora.
-- **Alt+Shift+K** pausa ou continua a leitura de qualquer lugar, mesmo com
-  o foco na página. Os atalhos podem ser trocados em
-  `chrome://extensions/shortcuts`.
-- **A página acompanha o áudio:** o trecho que está sendo lido fica
-  destacado na página (contorno laranja) e a página rola sozinha até ele.
-- **O áudio acompanha a rolagem:** se você rolar a página (mouse, teclado
-  ou toque), a leitura pula para o trecho que está no topo da tela. Com a
-  leitura pausada, só muda o ponto de onde ela vai continuar. Logo depois
-  de você rolar, a página não pula sozinha por 2 segundos.
-- **Protótipo, leitura com o painel fechado** (opção no ⚙): a extensão lê
-  cada página mesmo sem abrir o painel, a partir da abertura do navegador.
-  Alt+Shift+K pausa e continua. Imagens SVG ficam sem descrição nesse modo.
-- Com a leitura automática desligada, clique em **"Ler esta página"**
-- Use **Espaço** para reproduzir/pausar, **← / →** para navegar entre seções
-- Clique em qualquer seção na lista para pular direto para ela
-- Ajuste a velocidade da voz no controle deslizante
-- Clique em **"↻ Ler a página de novo"** para extrair a página outra vez e
-  pedir à IA novas descrições das imagens (descarta as descrições guardadas;
-  útil se a página mudou ou se uma descrição saiu ruim)
+1. Abra o painel pelo ícone da extensão ou com **Alt+Shift+L**: a página
+   atual começa a ser lida sozinha.
+2. Navegue normalmente: cada página aberta (ou aba trocada) é lida
+   automaticamente, e a voz para quando você sai da página.
+3. Acompanhe na tela: o parágrafo lido fica destacado com um contorno
+   laranja e a página rola junto.
+4. Role a página para pular a leitura para outro ponto.
 
-## Reestruturação por IA (opcional)
+### Atalhos de teclado
 
-Clique no ícone de engrenagem (⚙) e cole uma chave de API da Anthropic
-(https://console.anthropic.com). Sem chave, a extensão funciona normalmente,
-apenas lendo o texto extraído sem reescrevê-lo.
+| Atalho | Onde | Ação |
+|---|---|---|
+| **Alt+Shift+L** | Qualquer lugar | Abre o painel e começa a ler |
+| **Alt+Shift+K** | Qualquer lugar | Pausa ou continua a leitura |
+| **Espaço** | No painel | Reproduz ou pausa |
+| **← / →** | No painel | Seção anterior / próxima |
 
-**Importante para uso em produção:** neste protótipo a chave fica salva no
-`chrome.storage.local` do navegador e as chamadas à API saem direto do
-navegador do usuário. Isso é aceitável para testes pessoais, mas expõe a
-chave no tráfego do cliente. Uma versão para outros usuários deveria ter
-um backend próprio guardando a chave, com a extensão chamando esse backend.
+Os atalhos globais podem ser trocados em `chrome://extensions/shortcuts`.
 
-## Descrição automática de imagens sem alt text
+No painel também há a lista de seções (clique para pular), o controle de
+velocidade da voz e o botão **"↻ Ler a página de novo"**, que extrai a
+página outra vez e descarta as descrições e traduções guardadas.
 
-A extensão lê o texto alternativo que a página já oferece e só usa IA
-quando ele falta:
+## 🔧 Configurações
 
-1. **Alt primeiro:** imagens com `alt`, `aria-label` ou `title` são lidas
-   direto, sem IA. Alt genérico (`"imagem"`, `"IMG_1234.jpg"`) conta como
-   ausente.
-2. **Decorativas ignoradas:** imagens que aparecem com menos de 48 px na
-   tela (ícones, inclusive os reduzidos por CSS, e pixels de rastreamento),
-   imagens escondidas e as marcadas com `role="presentation"`/`"none"` ou
-   dentro de um bloco `aria-hidden="true"` não são lidas nem enviadas.
-3. **IA só para o resto:** as imagens sem alt são reduzidas no navegador e
-   enviadas ao [backend do projeto](backend/README.md), que pede a descrição
-   ao Google Gemini. A chave do Gemini fica só no backend, nunca na extensão.
-4. **Economia:** cerca de 270 tokens por imagem, cache da mesma imagem na
-   sessão e no máximo 8 imagens por página (`LIMITE_IMAGENS_POR_PAGINA` no
-   `sidepanel.js`).
-5. **Descrição curta por padrão:** uma frase, como "Goleiro do Santos durante
-   o treino." Descrições detalhadas podem ser ligadas no ⚙.
+No ícone de engrenagem (⚙) do painel:
 
-Páginas sem texto de artigo (galerias de fotos) também funcionam: a
-extensão lê só a foto que está visível na tela, ignorando os outros slides
-do carrossel (escondidos, empilhados atrás ou cortados pela borda).
+| Opção | Padrão | O que faz |
+|---|---|---|
+| Chave de API da Anthropic | vazia | Opcional: reescreve o texto de cada seção em frases mais claras |
+| Descrever imagens sem texto alternativo | ligada | Envia ao Gemini só as imagens sem `alt` |
+| Descrições detalhadas | desligada | Até 2 frases em vez de uma frase curta |
+| Traduzir páginas em outro idioma | ligada | Traduz para o português antes de ler |
+| Ler também com o painel fechado | ligada | Lê as páginas sem precisar abrir o painel |
+| Ler automaticamente | ligada | Começa a ler sozinho a cada página aberta |
 
-Se o navegador não conseguir baixar a imagem direto (sites que só entregam
-a foto para quem está na página deles, imagens `blob:`), a própria página
-entrega a imagem para a extensão.
+> 💡 Quem usa um leitor de tela (como o NVDA) pode preferir desligar a
+> leitura automática e a leitura com o painel fechado, para as duas vozes
+> não falarem juntas.
 
-Imagens SVG (comuns em gráficos e ícones) são desenhadas pelo painel e
-convertidas em PNG antes de ir para a IA, porque o Gemini não aceita SVG.
-Uma imagem aberta sozinha numa aba (por exemplo, um `.svg` ou `.jpg` aberto
-direto) também é descrita.
+### Arquivos `.html` do computador
 
-Se a descrição falhar (imagem protegida, backend fora do ar, cota esgotada), a
-leitura avisa "Imagem sem descrição" em vez de omitir a imagem, e o motivo
-técnico aparece em letras pequenas no painel.
+O Chrome só deixa extensões lerem arquivos locais (`file:///`) com
+permissão: em `chrome://extensions`, clique em **Detalhes** no Leitor
+Acessível e ligue **"Permitir acesso a URLs de arquivo"**. Se a permissão
+estiver desligada, o painel explica como ligá-la.
 
-**Configuração:** o endereço do backend fica em `config.js`
-(`URL_BACKEND`) e aponta para o backend publicado na Cloudflare. Rodar o
-backend no computador (`npx wrangler dev`) só é preciso para testar
-mudanças nele (veja [backend/README.md](backend/README.md)). A descrição
-pode ser desligada no ⚙ do painel.
+## 📂 Estrutura do repositório
 
-**Privacidade:** imagens sem alt são enviadas ao backend e ao Google
-Gemini. No plano gratuito, o Google pode usá-las para melhorar os produtos
-dele. A extensão avisa isso nas configurações.
+```
+AI-accessibility-project/
+├── manifest.json        # Configuração da extensão (Manifest V3, permissões, atalhos)
+├── config.js            # Endereço do backend publicado
+├── content.js           # Roda na página: extração, destaque, rolagem
+├── readability.js       # Biblioteca da Mozilla para achar o conteúdo principal
+├── background.js        # Service worker: ponte, imagens, tradução, atalhos
+├── leitura-fundo.js     # Leitura com o painel fechado
+├── fala.js              # Divisão do texto em trechos para a voz
+├── sidepanel.html/.css/.js  # Painel lateral (interface)
+├── icons/               # Ícones da extensão
+├── backend/             # Servidor na Cloudflare (Gemini)
+│   ├── worker.js
+│   ├── wrangler.toml
+│   └── README.md
+└── docs/
+    ├── diagramas.md     # Diagramas em Mermaid, com explicação
+    └── diagramas/       # Diagramas em PNG (slides e documento)
+```
 
-## Tradução de páginas em outro idioma
+## 📋 Gestão do projeto no GitHub
 
-Páginas em inglês, espanhol ou qualquer outro idioma são traduzidas para o
-português antes da leitura, pelo mesmo [backend](backend/README.md) (rota
-`/traduzir`, Google Gemini).
+- **Branches:** `main` (versão estável, a do botão de download), `develop`
+  (integração) e um branch por tarefa: `feature/*` (funcionalidades),
+  `bugfix/*` (correções) e `docs/*` (documentação).
+- **Pull Requests:** toda mudança entra no `develop` por PR, com descrição
+  e tabela de testes; o `develop` é levado para a `main` quando está estável.
+- **Commits:** padrão [Conventional Commits](https://www.conventionalcommits.org/pt-br/)
+  (`feat:`, `fix:`, `docs:`), em português.
+- **Issues:** cada bug e funcionalidade tem uma Issue, fechada pelo PR que a
+  resolve (veja as [Issues](https://github.com/Hiago-Mantas/AI-accessibility-project/issues?q=is%3Aissue)
+  e os [Pull Requests](https://github.com/Hiago-Mantas/AI-accessibility-project/pulls?q=is%3Apr)).
 
-- **Idioma detectado pelo texto:** o Chrome identifica o idioma pelo próprio
-  conteúdo, sem internet. O `lang` do HTML só é usado quando ele não tem
-  certeza, porque muitos sites o deixam errado ou vazio. Páginas em
-  português não gastam nada.
-- **Economia:** a página vai em poucos pedidos (lotes de até 6.000
-  caracteres) e o mesmo texto não é traduzido duas vezes na sessão do
-  navegador. Texto custa bem menos que imagem: uma página inicial inteira
-  fica em poucos milhares de tokens.
-- **Sem tradução:** com a opção desligada no ⚙, ou se a tradução falhar, a
-  página é lida no idioma original com uma voz desse idioma (antes era lida
-  com voz em português, com sotaque). O motivo da falha aparece em letras
-  pequenas no painel.
-- **"↻ Ler a página de novo"** também descarta as traduções guardadas.
+## 🔒 Privacidade e segurança
 
-**Privacidade:** o texto da página é enviado ao backend e ao Google Gemini.
-A extensão avisa isso nas configurações.
+- A chave do Gemini fica só no backend, como segredo da Cloudflare; nunca
+  vai para a extensão nem para o repositório.
+- Só vão para o backend e para o Google Gemini: as **imagens sem alt** e o
+  **texto de páginas em outro idioma**. Páginas em português e imagens com
+  alt não saem do navegador.
+- No plano gratuito do Gemini, o Google pode usar o conteúdo enviado para
+  melhorar os produtos dele; a extensão avisa isso nas configurações, e as
+  duas funções podem ser desligadas.
+- A chave opcional da Anthropic fica salva só no navegador da pessoa
+  (`chrome.storage.local`).
 
-## Páginas HTML abertas do computador (`file:///`)
+## 🚧 Limitações conhecidas e próximos passos
 
-Por segurança, o Chrome não deixa extensões lerem arquivos do computador
-sem permissão. Para usar o Leitor Acessível num `.html` local:
+**Limitações**
 
-1. Abra `chrome://extensions`
-2. Clique em **Detalhes** no Leitor Acessível
-3. Ligue **"Permitir acesso a URLs de arquivo"**
+- O Chrome não deixa extensões abrirem o painel lateral sozinhas (só depois
+  de um clique ou atalho); por isso, ao abrir o navegador, quem lê é a
+  leitura com o painel fechado.
+- A voz depende das vozes instaladas no sistema operacional (no Windows em
+  português, a "Maria"); para ler uma página sem tradução em outro idioma,
+  é preciso ter uma voz desse idioma.
+- A divisão em seções segue os títulos da página; páginas sem nenhum título
+  viram um único bloco.
+- A cota gratuita do Gemini é limitada; quando acaba, a leitura avisa que a
+  imagem ficou sem descrição.
+- Com o painel fechado, imagens SVG ficam sem descrição.
 
-Com isso, o texto e as imagens do arquivo são lidos normalmente, inclusive
-a descrição por IA das imagens sem alt. Se a permissão estiver desligada,
-o painel explica como ligá-la.
+**Próximos passos**
 
-Alternativa sem mexer na permissão: abrir a pasta por um servidor local
-(Live Server do VS Code, ou `python -m http.server 8000` e acessar
-`http://localhost:8000/arquivo.html`).
+- Testes com pessoas usuárias de leitores de tela (NVDA) e ajustes a partir
+  deles.
+- Limite de pedidos por pessoa no backend.
+- Publicação na Chrome Web Store, para instalar sem o modo do desenvolvedor.
 
-## O que já funciona
+## 📊 Status
 
-- Extração de conteúdo robusta mesmo sem tags de SEO/schema, via
-  Readability.js (baseado em heurísticas de estrutura HTML, não metadados)
-- Páginas iniciais de empresas e portais (vários blocos curtos: banner,
-  cards, notícias): o Readability foi feito para artigos e às vezes pega só
-  o maior bloco. Quando ele deixa de fora mais da metade do texto ou dos
-  títulos visíveis, a extensão lê o conteúdo principal inteiro, sem menu,
-  rodapé, avisos de cookies e partes escondidas
-- Texto em qualquer elemento (`<div>`, `<span>`), não só em parágrafos
-- Divisão automática em seções navegáveis por heading
-- Leitor de voz nativo do navegador (Web Speech API), sem custo
-- Tradução automática para o português de páginas em outro idioma
-- Reestruturação opcional por IA, seção por seção
-- Navegação por teclado e painel com foco visível, pensado para uso com
-  leitor de tela concorrente (NVDA/VoiceOver) sem duplicar leitura
+🟢 **Funcional:** todas as funcionalidades acima estão implementadas e no
+branch `main`. Em fase de documentação final e preparação da apresentação.
 
-## Limitações conhecidas (próximos passos de um TCC)
+## 👤 Equipe
 
-- O Chrome não deixa nenhuma extensão abrir o painel lateral sozinha (só
-  depois de um clique ou atalho). Por isso a leitura automática começa
-  quando o painel é aberto, e não ao abrir o navegador.
-- A voz usa a API de voz das extensões (`chrome.tts`), que só tem as vozes
-  instaladas no sistema operacional (no Windows em português, a "Maria").
-  Para ler uma página sem tradução em outro idioma, é preciso ter uma voz
-  desse idioma instalada.
+Projeto individual.
 
-- Não foi testado ainda rodando junto com um leitor de tela real — o passo
-  5 do plano original (testar foco/leitura duplicada com NVDA) fica para a
-  próxima iteração
-- Divisão em seções é heurística (por heading); páginas sem heading nenhum
-  caem num único bloco
-- Qualidade da voz depende do TTS do sistema operacional
-- Sem avaliação com usuários reais ainda — o ponto mais importante para
-  virar um TCC de verdade, como conversamos
+- **Hiago Mantas** ([@Hiago-Mantas](https://github.com/Hiago-Mantas)):
+  análise, desenvolvimento da extensão e do backend, testes e documentação.
+
+## 📚 Referências
+
+1. SOMMERVILLE, Ian. **Engenharia de Software**. 10ª ed. São Paulo: Pearson, 2018.
+2. W3C. [Web Content Accessibility Guidelines (WCAG) 2.1](https://www.w3.org/TR/WCAG21/). 2018.
+3. W3C. [Images Tutorial: textos alternativos](https://www.w3.org/WAI/tutorials/images/).
+4. BRASIL. [Lei nº 13.146/2015: Lei Brasileira de Inclusão da Pessoa com Deficiência](https://www.planalto.gov.br/ccivil_03/_ato2015-2018/2015/lei/l13146.htm).
+5. IBGE. [Censo 2022: Brasil tem 14,4 milhões de pessoas com deficiência](https://agenciadenoticias.ibge.gov.br/agencia-noticias/2012-agencia-de-noticias/noticias/43463-censo-2022-brasil-tem-14-4-milhoes-de-pessoas-com-deficiencia). Agência de Notícias IBGE, 2025.
+6. MOZILLA. [Readability.js](https://github.com/mozilla/readability).
+7. GOOGLE. [Chrome Extensions: documentação (Manifest V3)](https://developer.chrome.com/docs/extensions).
+8. GOOGLE. [Gemini API: documentação](https://ai.google.dev/gemini-api/docs).
+9. CLOUDFLARE. [Workers: documentação](https://developers.cloudflare.com/workers/).
