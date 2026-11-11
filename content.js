@@ -71,6 +71,29 @@ function blocoDe(no) {
   return el;
 }
 
+// ---------- ligação entre o que é falado e a página ----------
+// Cada elemento da página ganha um data-leitor-id antes da extração. As
+// cópias (Readability, página inteira) mantêm o atributo, então cada trecho
+// lido sabe de qual elemento veio: dá para destacar e rolar até ele e, ao
+// contrário, saber qual trecho está na tela quando a pessoa rola.
+let ultimoIdLeitor = 0;
+// Identidade deste documento. Sites que mudam o endereço sem recarregar
+// (carrossel, abas, rastreamento) fazem o Chrome avisar "carregou" de novo;
+// com este id o leitor sabe que é a mesma página e não recomeça a leitura.
+const ID_DOCUMENTO = crypto.randomUUID();
+let idsDaLeitura = []; // ids dos trechos da última extração, na ordem de leitura
+
+function marcarElementos() {
+  for (const el of document.body ? document.body.querySelectorAll("*") : []) {
+    if (!el.hasAttribute("data-leitor-id")) el.setAttribute("data-leitor-id", String(++ultimoIdLeitor));
+  }
+}
+
+function idDe(el) {
+  const marcado = el && el.closest ? el.closest("[data-leitor-id]") : null;
+  return marcado ? marcado.getAttribute("data-leitor-id") : null;
+}
+
 function extrairSecoes(htmlLimpo) {
   // Transforma o HTML limpo em uma lista de seções usando os headings como
   // pontos de corte. Isso permite navegação "próxima seção / seção
@@ -80,7 +103,7 @@ function extrairSecoes(htmlLimpo) {
   const container = new DOMParser().parseFromString(htmlLimpo, "text/html").body;
 
   const secoes = [];
-  let atual = { titulo: null, textos: [], imagensSemAlt: [] };
+  let atual = { titulo: null, tituloId: null, blocos: [], imagensSemAlt: [], imagensSemAltIds: [] };
   // Texto do bloco que está sendo lido. Percorre TODOS os textos, não só
   // <p> e <li>: sites de empresa põem muito conteúdo em <div> e <span>
   // (cards, notícias, números), que antes eram pulados.
@@ -89,18 +112,21 @@ function extrairSecoes(htmlLimpo) {
 
   function fecharPedaco() {
     const texto = pedaco.replace(/\s+/g, " ").trim();
-    if (texto) atual.textos.push(texto);
+    if (texto) atual.blocos.push({ texto, id: idDe(blocoDoPedaco) });
     pedaco = "";
     blocoDoPedaco = null;
   }
 
   function fecharSecao() {
     fecharPedaco();
-    if (atual.titulo || atual.textos.length || atual.imagensSemAlt.length) {
+    if (atual.titulo || atual.blocos.length || atual.imagensSemAlt.length) {
       secoes.push({
         titulo: atual.titulo,
-        texto: atual.textos.join(" "),
+        tituloId: atual.tituloId,
+        texto: atual.blocos.map((b) => b.texto).join(" "),
+        blocos: atual.blocos, // o mesmo texto, em pedaços ligados aos elementos da página
         imagensSemAlt: atual.imagensSemAlt,
+        imagensSemAltIds: atual.imagensSemAltIds,
       });
     }
   }
@@ -126,15 +152,16 @@ function extrairSecoes(htmlLimpo) {
       const alt = textoAlternativo(no);
       if (alt) {
         // já tem alt text: só incorpora como texto, sem gastar chamada de IA
-        atual.textos.push(`Imagem: ${alt}.`);
+        atual.blocos.push({ texto: `Imagem: ${alt}.`, id: idDe(no) });
       } else if (!imagemEhDecorativa(no) && no.src) {
         atual.imagensSemAlt.push(no.src);
+        atual.imagensSemAltIds.push(idDe(no));
       }
     } else if (/^h[1-4]$/.test(tag)) {
       const titulo = no.textContent.replace(/\s+/g, " ").trim();
       if (titulo) {
         fecharSecao();
-        atual = { titulo, textos: [], imagensSemAlt: [] };
+        atual = { titulo, tituloId: idDe(no), blocos: [], imagensSemAlt: [], imagensSemAltIds: [] };
       }
       no = pularFilhos(caminhante);
       continue;
@@ -208,16 +235,20 @@ function extrairImagensVisiveis() {
   const escolhidas = naFrente.length ? naFrente : naTela.length ? naTela : grandes;
   if (escolhidas.length === 0) return null;
 
-  const textos = [];
+  const blocos = [];
   const imagensSemAlt = [];
+  const imagensSemAltIds = [];
   const vistas = new Set();
   for (const img of escolhidas) {
     const src = img.currentSrc || img.src;
     if (vistas.has(src)) continue;
     vistas.add(src);
     const alt = textoAlternativo(img);
-    if (alt) textos.push(`Imagem: ${alt}.`);
-    else imagensSemAlt.push(src);
+    if (alt) blocos.push({ texto: `Imagem: ${alt}.`, id: idDe(img) });
+    else {
+      imagensSemAlt.push(src);
+      imagensSemAltIds.push(idDe(img));
+    }
   }
 
   return {
@@ -225,7 +256,10 @@ function extrairImagensVisiveis() {
     titulo: document.title,
     autor: null,
     tempoLeituraMin: 1,
-    secoes: [{ titulo: "Imagens na tela", texto: textos.join(" "), imagensSemAlt }],
+    secoes: [{
+      titulo: "Imagens na tela", tituloId: null,
+      texto: blocos.map((b) => b.texto).join(" "), blocos, imagensSemAlt, imagensSemAltIds,
+    }],
   };
 }
 
@@ -239,7 +273,10 @@ function imagemAbertaNaAba() {
     titulo: document.title || nomeArquivo,
     autor: null,
     tempoLeituraMin: 1,
-    secoes: [{ titulo: "Imagem aberta nesta aba", texto: "", imagensSemAlt: [location.href] }],
+    secoes: [{
+      titulo: "Imagem aberta nesta aba", tituloId: null,
+      texto: "", blocos: [], imagensSemAlt: [location.href], imagensSemAltIds: [null],
+    }],
   };
 }
 
@@ -309,6 +346,8 @@ function extrairConteudoPagina() {
   const imagemSozinha = imagemAbertaNaAba();
   if (imagemSozinha) return imagemSozinha;
 
+  // Marca os elementos antes de qualquer cópia, para as cópias levarem os ids
+  marcarElementos();
   // Readability.js exige um clone do documento (ele modifica o DOM que recebe)
   const clone = document.cloneNode(true);
   const reader = new Readability(clone, { charThreshold: 100 });
@@ -402,11 +441,98 @@ async function lerImagemNaPagina(src) {
   throw new Error("imagem não encontrada na página");
 }
 
+// ---------- a página acompanha o áudio ----------
+
+const COR_DESTAQUE = "#f5a623";
+let destacado = null;
+let ultimaAcaoDoUsuario = 0; // rolagem com roda, toque, teclado ou barra
+
+function estiloDoDestaque() {
+  if (document.getElementById("leitor-acessivel-estilo")) return;
+  const estilo = document.createElement("style");
+  estilo.id = "leitor-acessivel-estilo";
+  estilo.textContent = `[data-leitor-destaque] {
+    outline: 3px solid ${COR_DESTAQUE} !important;
+    outline-offset: 4px !important;
+    background-color: rgba(245, 166, 35, 0.15) !important;
+    border-radius: 4px;
+  }`;
+  (document.head || document.documentElement).appendChild(estilo);
+}
+
+function destacar(id) {
+  if (destacado) destacado.removeAttribute("data-leitor-destaque");
+  destacado = id ? document.querySelector(`[data-leitor-id="${CSS.escape(id)}"]`) : null;
+  if (!destacado) return;
+  estiloDoDestaque();
+  destacado.setAttribute("data-leitor-destaque", "");
+  // A pessoa acabou de rolar: ela está no controle, a página não pula
+  if (Date.now() - ultimaAcaoDoUsuario < 2000) return;
+  const r = destacado.getBoundingClientRect();
+  const foraDaTela = r.top < 0 || r.bottom > innerHeight;
+  if (foraDaTela) {
+    // Blocos maiores que a tela: alinha o começo deles no topo
+    destacado.scrollIntoView({ behavior: "smooth", block: r.height > innerHeight * 0.8 ? "start" : "center" });
+  }
+}
+
+// ---------- o áudio acompanha a rolagem ----------
+
+const TECLAS_DE_ROLAGEM = new Set(["PageDown", "PageUp", "ArrowDown", "ArrowUp", "Space", "Home", "End"]);
+let esperaRolagem = null;
+
+function marcarAcaoDoUsuario() {
+  ultimaAcaoDoUsuario = Date.now();
+}
+
+function trechoNoTopoDaTela() {
+  // Primeiro trecho (na ordem de leitura) que ainda aparece abaixo da faixa
+  // de cima da tela: é por onde a pessoa está lendo com os olhos
+  const linha = innerHeight * 0.15;
+  const visiveis = [];
+  for (const id of idsDaLeitura) {
+    const el = document.querySelector(`[data-leitor-id="${CSS.escape(id)}"]`);
+    if (!el) continue;
+    const r = el.getBoundingClientRect();
+    if (r.height > 0 && r.bottom > linha && r.top < innerHeight) visiveis.push({ id, topo: r.top });
+  }
+  // Pela posição na tela (as imagens são lidas no fim da seção, mas
+  // aparecem no meio dela); manda alguns, caso o primeiro não seja lido
+  return visiveis.sort((a, b) => a.topo - b.topo).slice(0, 5).map((v) => v.id);
+}
+
+function aoRolar() {
+  // Só a rolagem feita pela pessoa: a rolagem da própria leitura (página
+  // acompanhando o áudio) e a do site não contam
+  if (Date.now() - ultimaAcaoDoUsuario > 1000 || !idsDaLeitura.length) return;
+  clearTimeout(esperaRolagem);
+  esperaRolagem = setTimeout(() => {
+    const ids = trechoNoTopoDaTela();
+    if (ids.length) chrome.runtime.sendMessage({ tipo: "ROLAGEM_USUARIO", ids, documentoId: ID_DOCUMENTO }).catch(() => {});
+  }, 500); // espera a pessoa parar de rolar
+}
+
 // O background pode injetar este script de novo numa aba que já o tem
 // (ver extrairDaAba): registra o listener uma vez só, senão a página
 // responderia em dobro.
 if (!globalThis.leitorAcessivelCarregado) {
   globalThis.leitorAcessivelCarregado = true;
+
+  for (const tipo of ["wheel", "touchmove", "mousedown"]) {
+    addEventListener(tipo, marcarAcaoDoUsuario, { passive: true, capture: true });
+  }
+  addEventListener("keydown", (e) => {
+    if (TECLAS_DE_ROLAGEM.has(e.code)) marcarAcaoDoUsuario();
+  }, true);
+  // capture: pega também a rolagem de áreas internas da página
+  addEventListener("scroll", aoRolar, { passive: true, capture: true });
+
+  // A página está saindo de verdade (outro endereço, recarregar, fechar a
+  // aba): o leitor cala na hora. Mudar só o endereço (pushState, #) não
+  // dispara isto.
+  addEventListener("pagehide", () => {
+    chrome.runtime.sendMessage({ tipo: "PAGINA_SAINDO", documentoId: ID_DOCUMENTO }).catch(() => {});
+  });
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.tipo === "EXTRACT_CONTENT") {
@@ -415,10 +541,24 @@ if (!globalThis.leitorAcessivelCarregado) {
         // Idioma declarado pela página (ex.: "en-US"): o painel confirma
         // pelo próprio texto, porque muitos sites declaram errado ou nada
         resultado.idioma = document.documentElement.lang || null;
+        resultado.documentoId = ID_DOCUMENTO;
+        destacar(null);
+        idsDaLeitura = resultado.ok
+          ? resultado.secoes.flatMap((s) => [s.tituloId, ...s.blocos.map((b) => b.id), ...s.imagensSemAltIds])
+              .filter((id, i, todos) => id && todos.indexOf(id) === i)
+          : [];
         sendResponse(resultado);
       } catch (erro) {
         sendResponse({ ok: false, motivo: "Erro ao processar a página: " + erro.message });
       }
+    }
+    if (msg.tipo === "QUAL_DOCUMENTO") {
+      sendResponse({ documentoId: ID_DOCUMENTO });
+      return false;
+    }
+    if (msg.tipo === "DESTACAR") {
+      destacar(msg.id);
+      return false;
     }
     if (msg.tipo === "LER_IMAGEM") {
       lerImagemNaPagina(msg.src)

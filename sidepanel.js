@@ -48,6 +48,10 @@ let idiomaLeitura = "pt-BR"; // idioma da voz: o da página quando ela não é t
 let errosDescricao = []; // motivos técnicos das falhas (descrição e tradução), mostrados (não falados) no painel
 let geracaoFala = 0; // incrementa a cada nova leitura/parada: invalida callbacks de falas canceladas
 let trechoAtual = 0; // trecho da seção atual sendo falado: pausar e continuar volta a ele
+let abaDaLeitura = null; // aba da página lida: recebe o destaque do trecho falado
+// Documento lido (content.js, ID_DOCUMENTO): se o site só muda o endereço
+// (pushState, #), o documento é o mesmo e a leitura não recomeça
+let documentoDaLeitura = null;
 
 function anunciar(mensagem) {
   // Limpa antes para que a mesma mensagem repetida seja anunciada de novo
@@ -162,28 +166,69 @@ function paginaSaindo(windowId) {
   if (lerAutomaticamente && windowId === minhaJanela) pararLeitura();
 }
 
-function paginaMudou(windowId) {
+function documentoDaAba(tabId) {
+  return chrome.tabs
+    .sendMessage(tabId, { tipo: "QUAL_DOCUMENTO" })
+    .then((r) => (r && r.documentoId) || null)
+    .catch(() => null);
+}
+
+function paginaMudou(windowId, tabId, { trocouDeAba = false } = {}) {
   if (!lerAutomaticamente || windowId !== minhaJanela) return;
   // Junta eventos em sequência (redirecionamentos, troca rápida de abas)
   clearTimeout(esperaTroca);
-  esperaTroca = setTimeout(() => pedirLeitura({ automatico: true }), 700);
+  esperaTroca = setTimeout(async () => {
+    // "Carregou" de novo, mas é o mesmo documento (o site só mudou o
+    // endereço): a leitura continua. Antes ela recomeçava a cada mudança e,
+    // em sites que mudam o endereço sem parar, nunca saía do "Carregando".
+    if (!trocouDeAba && tabId === abaDaLeitura) {
+      const documento = await documentoDaAba(tabId);
+      if (documento && documento === documentoDaLeitura) return;
+    }
+    pedirLeitura({ automatico: true });
+  }, 700);
 }
 
 // Página nova na aba ativa, ou troca de aba
 chrome.tabs.onUpdated.addListener((tabId, mudanca, aba) => {
-  if (!aba.active) return;
-  if (mudanca.status === "loading") paginaSaindo(aba.windowId);
-  if (mudanca.status === "complete") paginaMudou(aba.windowId);
+  if (aba.active && mudanca.status === "complete") paginaMudou(aba.windowId, tabId);
 });
 chrome.tabs.onActivated.addListener((info) => {
   paginaSaindo(info.windowId);
-  paginaMudou(info.windowId);
+  paginaMudou(info.windowId, info.tabId, { trocouDeAba: true });
 });
 
 // Alt+Shift+K (background.js): pausa ou continua de qualquer lugar
-chrome.runtime.onMessage.addListener((msg) => {
+chrome.runtime.onMessage.addListener((msg, remetente) => {
   if (msg.tipo === "ALTERNAR_LEITURA" && !el.estadoLeitura.classList.contains("oculto")) alternarLeitura();
+  if (msg.tipo === "ROLAGEM_USUARIO" && remetente.tab && remetente.tab.id === abaDaLeitura) {
+    pularParaATela(msg.ids);
+  }
+  // A página lida saiu de verdade (outro endereço, recarregar): cala na hora
+  if (msg.tipo === "PAGINA_SAINDO" && remetente.tab && remetente.tab.id === abaDaLeitura &&
+      msg.documentoId === documentoDaLeitura) {
+    paginaSaindo(remetente.tab.windowId);
+  }
 });
+
+function pularParaATela(ids) {
+  // A pessoa rolou a página: a leitura vai para o trecho que está no topo
+  // da tela. Pausado, só muda o ponto de onde vai continuar.
+  if (el.estadoLeitura.classList.contains("oculto")) return;
+  for (const id of ids) {
+    for (let s = 0; s < secoes.length; s++) {
+      const t = trechosDaSecao(secoes[s]).findIndex((trecho) => trecho.id === id);
+      if (t === -1) continue;
+      if (s === indiceAtual && t === trechoAtual) return; // já está lendo este
+      indiceAtual = s;
+      trechoAtual = t;
+      exibirSecaoAtual();
+      if (falando) lerSecaoAtual(t);
+      else destacarNaPagina(id);
+      return;
+    }
+  }
+}
 
 // Ao abrir o painel (clique no ícone ou Alt+Shift+L), já lê a página atual.
 // O Chrome não deixa extensões abrirem o painel sozinhas: é preciso um
@@ -236,6 +281,12 @@ async function iniciarExtracao({ automatico = false } = {}) {
   // na etapa de descrição e só depois as vazias são descartadas
   errosDescricao = [];
   textosDaPagina = [];
+  abaDaLeitura = resposta.tabId ?? null;
+  documentoDaLeitura = resposta.documentoId || null;
+  for (const secao of resposta.secoes) {
+    secao.blocos = secao.blocos || (secao.texto ? [{ texto: secao.texto, id: null }] : []);
+    secao.imagensSemAltIds = secao.imagensSemAltIds || [];
+  }
   imagensDaPagina = resposta.secoes.flatMap((s) => s.imagensSemAlt || []);
   secoes = resposta.secoes.filter(
     (s) => (s.texto && s.texto.length > 0) || (s.imagensSemAlt && s.imagensSemAlt.length > 0)
@@ -297,6 +348,34 @@ async function iniciarExtracao({ automatico = false } = {}) {
   }
 }
 
+// ---------- blocos: pedaços do texto ligados aos elementos da página ----------
+
+function juntarTexto(secao) {
+  // O texto da seção (mostrado no painel e enviado à IA) é a soma dos blocos
+  secao.texto = secao.blocos.map((b) => b.texto).join(" ");
+}
+
+function acrescentarBloco(secao, texto, id = null) {
+  secao.blocos.push({ texto, id });
+  juntarTexto(secao);
+}
+
+function trechosDaSecao(secao) {
+  // O que a voz fala, em trechos curtos, cada um com o id do elemento da
+  // página de onde veio (para destacar e rolar até ele)
+  const trechos = [];
+  if (secao.titulo) trechos.push({ texto: `${secao.titulo}.`, id: secao.tituloId });
+  for (const bloco of secao.blocos) {
+    for (const texto of dividirEmTrechos(bloco.texto)) trechos.push({ texto, id: bloco.id });
+  }
+  return trechos;
+}
+
+function destacarNaPagina(id) {
+  if (abaDaLeitura === null) return;
+  chrome.tabs.sendMessage(abaDaLeitura, { tipo: "DESTACAR", id }).catch(() => {});
+}
+
 // ---------- tradução ----------
 
 function detectarIdioma(resposta) {
@@ -331,8 +410,9 @@ function nomeDoIdioma(codigo) {
 async function traduzirPagina(resposta, idioma) {
   el.textoCarregando.textContent = `Traduzindo a página do ${nomeDoIdioma(idioma)} para o português…`;
   // Tudo num pedido só (o background divide em lotes): título da página e,
-  // de cada seção, o título e o texto, nesta ordem
-  const textos = [resposta.titulo || "", ...secoes.flatMap((s) => [s.titulo || "", s.texto || ""])];
+  // de cada seção, o título e cada bloco, nesta ordem. Bloco por bloco para
+  // a tradução continuar ligada aos elementos da página (destaque e rolagem).
+  const textos = [resposta.titulo || "", ...secoes.flatMap((s) => [s.titulo || "", ...s.blocos.map((b) => b.texto)])];
   const resultado = await pedirDescricao({ tipo: "TRADUZIR", textos, origem: idioma });
   if (!resultado || !resultado.ok) {
     // Sem tradução a página ainda é lida, no idioma original
@@ -342,10 +422,13 @@ async function traduzirPagina(resposta, idioma) {
   textosDaPagina = textos.filter((t) => t.trim());
   const [titulo, ...resto] = resultado.traducoes;
   resposta.titulo = titulo;
-  secoes.forEach((secao, i) => {
-    if (secao.titulo) secao.titulo = resto[2 * i];
-    secao.texto = resto[2 * i + 1];
-  });
+  let i = 0;
+  for (const secao of secoes) {
+    const tituloTraduzido = resto[i++];
+    if (secao.titulo) secao.titulo = tituloTraduzido;
+    for (const bloco of secao.blocos) bloco.texto = resto[i++];
+    juntarTexto(secao);
+  }
   return true;
 }
 
@@ -370,7 +453,11 @@ async function reestruturarComIA() {
     // se a chamada falhar (ex: chave inválida), mantém o texto original
     // dessa seção e segue em frente, em vez de travar tudo
     if (resultado && resultado.ok) {
-      secoes[i].texto = resultado.texto;
+      // O texto reescrito não tem mais os blocos da página: fica um bloco
+      // só, ligado ao começo da seção
+      const primeiro = secoes[i].blocos.find((b) => b.id);
+      secoes[i].blocos = [{ texto: resultado.texto, id: primeiro ? primeiro.id : secoes[i].tituloId }];
+      juntarTexto(secoes[i]);
     }
   }
 }
@@ -385,9 +472,9 @@ async function descreverImagensSemAlt() {
   for (const secao of secoes) {
     if (!secao.imagensSemAlt || secao.imagensSemAlt.length === 0) continue;
 
-    for (const src of secao.imagensSemAlt) {
+    for (const [j, src] of secao.imagensSemAlt.entries()) {
       if (processadas >= LIMITE_IMAGENS_POR_PAGINA) {
-        secao.texto += " (Há mais imagens sem descrição nesta página além do limite processado.)";
+        acrescentarBloco(secao, "(Há mais imagens sem descrição nesta página além do limite processado.)");
         return;
       }
       processadas += 1;
@@ -396,9 +483,11 @@ async function descreverImagensSemAlt() {
       const descricao = await descreverPeloBackend(src);
       // Se falhar (imagem protegida, SVG, backend fora do ar, cota esgotada),
       // avisa que a imagem existe em vez de omiti-la e segue com o resto
-      secao.texto += descricao
-        ? ` Imagem: ${descricao}`
-        : " Imagem sem descrição: não foi possível analisá-la.";
+      acrescentarBloco(
+        secao,
+        descricao ? `Imagem: ${descricao}` : "Imagem sem descrição: não foi possível analisá-la.",
+        secao.imagensSemAltIds[j] || null
+      );
     }
   }
 }
@@ -463,7 +552,7 @@ function avisarImagensSemDescricao() {
   // silenciosamente sem essa informação, avisa que ela existe e falta.
   for (const secao of secoes) {
     if (secao.imagensSemAlt && secao.imagensSemAlt.length > 0) {
-      secao.texto += ` (Esta seção contém ${secao.imagensSemAlt.length === 1 ? "uma imagem" : secao.imagensSemAlt.length + " imagens"} sem texto alternativo. Ative a descrição de imagens nas configurações para ouvi-la.)`;
+      acrescentarBloco(secao, `(Esta seção contém ${secao.imagensSemAlt.length === 1 ? "uma imagem" : secao.imagensSemAlt.length + " imagens"} sem texto alternativo. Ative a descrição de imagens nas configurações para ouvi-la.)`);
     }
   }
 }
@@ -564,12 +653,11 @@ function lerSecaoAtual(trechoInicial = 0) {
   let primeiro = true;
 
   for (let s = indiceAtual; s < secoes.length; s++) {
-    const secao = secoes[s];
-    const trechos = dividirEmTrechos((secao.titulo ? secao.titulo + ". " : "") + secao.texto);
+    const trechos = trechosDaSecao(secoes[s]);
     trechos.forEach((trecho, t) => {
       if (s === indiceAtual && t < trechoInicial) return;
       const ultimoDaPagina = s === secoes.length - 1 && t === trechos.length - 1;
-      chrome.tts.speak(trecho, {
+      chrome.tts.speak(trecho.texto, {
         lang: idiomaLeitura,
         rate: velocidade,
         enqueue: !primeiro, // o primeiro substitui o que estiver falando
@@ -577,15 +665,18 @@ function lerSecaoAtual(trechoInicial = 0) {
           // Evento de uma fila que já foi cancelada (navegou/pausou): ignora
           if (geracao !== geracaoFala) return;
           if (evento.type === "start") {
-            // A voz chegou neste trecho: acompanha no painel
+            // A voz chegou neste trecho: acompanha no painel e na página
+            // (destaca o trecho e rola até ele)
             trechoAtual = t;
             if (indiceAtual !== s) {
               indiceAtual = s;
               exibirSecaoAtual();
             }
+            if (trecho.id) destacarNaPagina(trecho.id);
           } else if (ultimoDaPagina && (evento.type === "end" || evento.type === "error")) {
             trechoAtual = 0;
             pararLeitura();
+            destacarNaPagina(null);
           }
         },
       });

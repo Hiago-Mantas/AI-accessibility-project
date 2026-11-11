@@ -34,6 +34,15 @@ Cloudflare, sem precisar abrir terminal nem configurar chave. Detalhes em
 - **Alt+Shift+K** pausa ou continua a leitura de qualquer lugar, mesmo com
   o foco na página. Os atalhos podem ser trocados em
   `chrome://extensions/shortcuts`.
+- **A página acompanha o áudio:** o trecho que está sendo lido fica
+  destacado na página (contorno laranja) e a página rola sozinha até ele.
+- **O áudio acompanha a rolagem:** se você rolar a página (mouse, teclado
+  ou toque), a leitura pula para o trecho que está no topo da tela. Com a
+  leitura pausada, só muda o ponto de onde ela vai continuar. Logo depois
+  de você rolar, a página não pula sozinha por 2 segundos.
+- **Protótipo, leitura com o painel fechado** (opção no ⚙): a extensão lê
+  cada página mesmo sem abrir o painel, a partir da abertura do navegador.
+  Alt+Shift+K pausa e continua. Imagens SVG ficam sem descrição nesse modo.
 - Com a leitura automática desligada, clique em **"Ler esta página"**
 - Use **Espaço** para reproduzir/pausar, **← / →** para navegar entre seções
 - Clique em qualquer seção na lista para pular direto para ela
