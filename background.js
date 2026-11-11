@@ -1,6 +1,6 @@
 // background.js (service worker)
 
-importScripts("config.js"); // URL_BACKEND
+importScripts("config.js", "fala.js", "leitura-fundo.js"); // URL_BACKEND, dividirEmTrechos, leitura com o painel fechado
 
 chrome.action.onClicked.addListener((tab) => {
   chrome.sidePanel.open({ tabId: tab.id });
@@ -11,11 +11,14 @@ chrome.action.onClicked.addListener((tab) => {
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 
 // Alt+Shift+K: pausa ou continua a leitura sem precisar levar o foco até o
-// painel (útil com a leitura automática, enquanto a pessoa navega na página)
-chrome.commands.onCommand.addListener((comando) => {
-  if (comando === "alternar-leitura") {
-    // Com o painel fechado ninguém recebe a mensagem: ignora o erro
+// painel (útil com a leitura automática, enquanto a pessoa navega na página).
+// Com o painel fechado, quem responde é a leitura de fundo (leitura-fundo.js).
+chrome.commands.onCommand.addListener((comando, tab) => {
+  if (comando !== "alternar-leitura") return;
+  if (tab && painelAbertoNaJanela(tab.windowId)) {
     chrome.runtime.sendMessage({ tipo: "ALTERNAR_LEITURA" }).catch(() => {});
+  } else {
+    alternarLeituraDeFundo(tab);
   }
 });
 
@@ -28,7 +31,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: false, motivo: "Nenhuma aba ativa encontrada." });
         return;
       }
-      extrairDaAba(tabs[0].id, tabs[0].url).then(sendResponse);
+      // tabId: o painel usa para destacar na página o trecho que está lendo
+      extrairDaAba(tabs[0].id, tabs[0].url).then((resposta) => sendResponse(resposta && { ...resposta, tabId: tabs[0].id }));
     });
     return true; // resposta assíncrona
   }
@@ -55,6 +59,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true; // resposta assíncrona
   }
 });
+
+function documentoDaAba(tabId) {
+  // Identidade do documento aberto na aba (ver ID_DOCUMENTO no content.js);
+  // null se a aba não tem o content script (página interna, ainda carregando)
+  return chrome.tabs
+    .sendMessage(tabId, { tipo: "QUAL_DOCUMENTO" })
+    .then((r) => (r && r.documentoId) || null)
+    .catch(() => null);
+}
 
 function pedirExtracao(tabId) {
   return new Promise((resolve) => {
@@ -237,6 +250,7 @@ async function descreverImagem(src, detalhe, pngConvertido) {
 // Lotes menores que o limite do backend (60 textos / 12.000 caracteres)
 const LOTE_MAX_TEXTOS = 40;
 const LOTE_MAX_CARACTERES = 6000;
+const LOTES_EM_PARALELO = 3;
 
 function montarLotes(textos) {
   const lotes = [];
@@ -298,7 +312,7 @@ async function traduzirTextos(textos, origem) {
   const todasAsPartes = [...new Set(pendentes.flatMap((p) => p.partes))];
   const traduzidas = new Map();
 
-  for (const lote of montarLotes(todasAsPartes)) {
+  async function traduzirLote(lote) {
     let resposta;
     try {
       resposta = await fetch(`${URL_BACKEND}/traduzir`, {
@@ -313,6 +327,15 @@ async function traduzirTextos(textos, origem) {
     if (!resposta.ok) throw falhaNaEtapa("backend", dados.erro || `HTTP ${resposta.status}`);
     lote.forEach((parte, i) => traduzidas.set(parte, dados.traducoes[i]));
   }
+
+  // Até LOTES_EM_PARALELO pedidos ao mesmo tempo: a página vai bloco por
+  // bloco (para o destaque acompanhar o áudio) e pode dar vários lotes
+  const lotes = montarLotes(todasAsPartes);
+  let proximo = 0;
+  async function trabalhador() {
+    while (proximo < lotes.length) await traduzirLote(lotes[proximo++]);
+  }
+  await Promise.all(Array.from({ length: Math.min(LOTES_EM_PARALELO, lotes.length) }, trabalhador));
 
   const paraGuardar = {};
   for (const { indice, partes } of pendentes) {
