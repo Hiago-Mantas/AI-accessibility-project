@@ -26,7 +26,15 @@ Cloudflare, sem precisar abrir terminal nem configurar chave. Detalhes em
 
 ## Como usar
 
-- Clique em **"Ler esta página"** para extrair o conteúdo
+- Abra o painel clicando no ícone da extensão ou com **Alt+Shift+L**.
+  A página atual começa a ser lida sozinha.
+- **Leitura automática** (ligada por padrão, no ⚙): com o painel aberto,
+  cada página que você abrir, recarregar ou trocar de aba é lida sozinha,
+  sem tirar o foco da página. Ao sair de uma página, a voz para na hora.
+- **Alt+Shift+K** pausa ou continua a leitura de qualquer lugar, mesmo com
+  o foco na página. Os atalhos podem ser trocados em
+  `chrome://extensions/shortcuts`.
+- Com a leitura automática desligada, clique em **"Ler esta página"**
 - Use **Espaço** para reproduzir/pausar, **← / →** para navegar entre seções
 - Clique em qualquer seção na lista para pular direto para ela
 - Ajuste a velocidade da voz no controle deslizante
@@ -152,6 +160,14 @@ Alternativa sem mexer na permissão: abrir a pasta por um servidor local
   leitor de tela concorrente (NVDA/VoiceOver) sem duplicar leitura
 
 ## Limitações conhecidas (próximos passos de um TCC)
+
+- O Chrome não deixa nenhuma extensão abrir o painel lateral sozinha (só
+  depois de um clique ou atalho). Por isso a leitura automática começa
+  quando o painel é aberto, e não ao abrir o navegador.
+- A voz usa a API de voz das extensões (`chrome.tts`), que só tem as vozes
+  instaladas no sistema operacional (no Windows em português, a "Maria").
+  Para ler uma página sem tradução em outro idioma, é preciso ter uma voz
+  desse idioma instalada.
 
 - Não foi testado ainda rodando junto com um leitor de tela real — o passo
   5 do plano original (testar foco/leitura duplicada com NVDA) fica para a

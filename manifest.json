@@ -3,7 +3,7 @@
   "name": "Leitor Acessível com IA",
   "version": "0.1.0",
   "description": "Extrai e reestrutura o conteúdo de qualquer página para leitura em voz alta, mesmo em sites mal estruturados ou com SEO ruim.",
-  "permissions": ["activeTab", "scripting", "storage", "sidePanel"],
+  "permissions": ["activeTab", "scripting", "storage", "sidePanel", "tts"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"
@@ -25,5 +25,15 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": { "default": "Alt+Shift+L" },
+      "description": "Abrir o Leitor Acessível"
+    },
+    "alternar-leitura": {
+      "suggested_key": { "default": "Alt+Shift+K" },
+      "description": "Pausar ou continuar a leitura"
+    }
   }
 }

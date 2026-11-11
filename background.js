@@ -6,8 +6,18 @@ chrome.action.onClicked.addListener((tab) => {
   chrome.sidePanel.open({ tabId: tab.id });
 });
 
-// Permite abrir o painel lateral clicando no ícone (comportamento padrão MV3)
+// Permite abrir o painel lateral clicando no ícone (comportamento padrão MV3).
+// O atalho Alt+Shift+L (_execute_action no manifest) faz o mesmo que o clique.
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+
+// Alt+Shift+K: pausa ou continua a leitura sem precisar levar o foco até o
+// painel (útil com a leitura automática, enquanto a pessoa navega na página)
+chrome.commands.onCommand.addListener((comando) => {
+  if (comando === "alternar-leitura") {
+    // Com o painel fechado ninguém recebe a mensagem: ignora o erro
+    chrome.runtime.sendMessage({ tipo: "ALTERNAR_LEITURA" }).catch(() => {});
+  }
+});
 
 // Ponte: o side panel não tem acesso direto ao DOM da página, então pede
 // ao background para repassar a extração ao content script da aba ativa.
