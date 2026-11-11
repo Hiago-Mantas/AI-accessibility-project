@@ -38,6 +38,15 @@
       O texto da página é enviado ao servidor do Leitor Acessível e ao Google Gemini para a
       tradução. Desligado, a página é lida no idioma original, com uma voz desse idioma.
     </p>
+    <label class="opcao-marcavel">
+      <input type="checkbox" id="input-ler-automaticamente" checked />
+      Ler automaticamente: com o painel aberto, cada página que você abrir é lida sozinha
+    </label>
+    <p class="ajuda">
+      Atalhos: <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>L</kbd> abre o painel e
+      <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd> pausa ou continua, mesmo com o foco na página.
+      Se você usa um leitor de tela (NVDA), pode preferir desligar para as duas vozes não falarem juntas.
+    </p>
     <button id="btn-salvar-key">Salvar</button>
   </section>
 
@@ -92,7 +101,8 @@
   </main>
 
   <p class="atalhos">
-    Atalhos: <kbd>Espaço</kbd> reproduzir/pausar · <kbd>←</kbd> seção anterior · <kbd>→</kbd> próxima seção
+    Atalhos: <kbd>Espaço</kbd> reproduzir/pausar · <kbd>←</kbd> seção anterior · <kbd>→</kbd> próxima seção ·
+    <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>K</kbd> pausar de qualquer lugar
   </p>
 
   <script src="config.js"></script>

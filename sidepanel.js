@@ -7,6 +7,7 @@ const el = {
   inputDescreverImagens: document.getElementById("input-descrever-imagens"),
   inputDescricaoDetalhada: document.getElementById("input-descricao-detalhada"),
   inputTraduzir: document.getElementById("input-traduzir"),
+  inputLerAutomaticamente: document.getElementById("input-ler-automaticamente"),
   btnSalvarKey: document.getElementById("btn-salvar-key"),
 
   estadoInicial: document.getElementById("estado-inicial"),
@@ -41,10 +42,11 @@ let apiKey = null;
 let descreverImagens = true; // descrever imagens sem alt pelo backend (Gemini)
 let descricaoDetalhada = false; // padrão: uma frase curta por imagem
 let traduzirPaginas = true; // traduzir para o português páginas em outro idioma
+let lerAutomaticamente = true; // extrair e começar a ler sozinho a cada página aberta
 let idiomaLeitura = "pt-BR"; // idioma da voz: o da página quando ela não é traduzida
 let errosDescricao = []; // motivos técnicos das falhas (descrição e tradução), mostrados (não falados) no painel
 let geracaoFala = 0; // incrementa a cada nova leitura/parada: invalida callbacks de falas canceladas
-let utteranceAtual = null; // referência viva evita que o Chrome descarte a fala e nunca dispare onend
+let trechoAtual = 0; // trecho da seção atual sendo falado: pausar e continuar volta a ele
 
 function anunciar(mensagem) {
   // Limpa antes para que a mesma mensagem repetida seja anunciada de novo
@@ -62,7 +64,9 @@ function mostrarEstado(nome) {
 
 // ---------- configuração da chave de API ----------
 
-chrome.storage.local.get(["anthropicApiKey", "descreverImagens", "descricaoDetalhada", "traduzirPaginas"], (dados) => {
+const configuracaoCarregada = new Promise((pronto) => chrome.storage.local.get(
+  ["anthropicApiKey", "descreverImagens", "descricaoDetalhada", "traduzirPaginas", "lerAutomaticamente"],
+  (dados) => {
   if (dados.anthropicApiKey) {
     apiKey = dados.anthropicApiKey;
     el.inputApiKey.value = dados.anthropicApiKey;
@@ -73,7 +77,10 @@ chrome.storage.local.get(["anthropicApiKey", "descreverImagens", "descricaoDetal
   el.inputDescricaoDetalhada.checked = descricaoDetalhada;
   traduzirPaginas = dados.traduzirPaginas !== false; // ligado por padrão
   el.inputTraduzir.checked = traduzirPaginas;
-});
+  lerAutomaticamente = dados.lerAutomaticamente !== false; // ligado por padrão
+  el.inputLerAutomaticamente.checked = lerAutomaticamente;
+  pronto();
+}));
 
 el.btnConfig.addEventListener("click", () => {
   const abrindo = el.painelConfig.classList.contains("oculto");
@@ -86,15 +93,16 @@ el.btnSalvarKey.addEventListener("click", () => {
   descreverImagens = el.inputDescreverImagens.checked;
   descricaoDetalhada = el.inputDescricaoDetalhada.checked;
   traduzirPaginas = el.inputTraduzir.checked;
-  chrome.storage.local.set({ anthropicApiKey: apiKey, descreverImagens, descricaoDetalhada, traduzirPaginas });
+  lerAutomaticamente = el.inputLerAutomaticamente.checked;
+  chrome.storage.local.set({ anthropicApiKey: apiKey, descreverImagens, descricaoDetalhada, traduzirPaginas, lerAutomaticamente });
   el.painelConfig.classList.add("oculto");
   el.btnConfig.setAttribute("aria-expanded", "false");
 });
 
 // ---------- extração de conteúdo ----------
 
-el.btnExtrair.addEventListener("click", iniciarExtracao);
-el.btnTentarDeNovo.addEventListener("click", iniciarExtracao);
+el.btnExtrair.addEventListener("click", () => pedirLeitura());
+el.btnTentarDeNovo.addEventListener("click", () => pedirLeitura());
 el.btnLerDeNovo.addEventListener("click", lerDeNovo);
 
 let imagensDaPagina = []; // endereços das imagens sem alt da última leitura
@@ -108,77 +116,165 @@ async function lerDeNovo() {
     .flatMap((src) => ["curto", "detalhado"].map((detalhe) => `descricao:${detalhe}:${src}`))
     .concat(textosDaPagina.map((texto) => `traducao:${texto}`));
   if (chaves.length) await chrome.storage.session.remove(chaves);
-  iniciarExtracao();
+  pedirLeitura();
 }
 
-function iniciarExtracao() {
+// ---------- leitura automática ----------
+
+// Uma extração por vez: a tradução e as descrições de imagem levam alguns
+// segundos e mexem nas seções. Se a pessoa trocar de página no meio, a nova
+// leitura espera a atual terminar (e a atual não chega a ser lida).
+let extraindo = false;
+let leituraPendente = null;
+
+function pedirLeitura(opcoes = {}) {
+  if (extraindo) {
+    leituraPendente = opcoes;
+    pararLeitura();
+    return;
+  }
+  extraindo = true;
+  iniciarExtracao(opcoes).finally(() => {
+    extraindo = false;
+    if (leituraPendente) {
+      const proxima = leituraPendente;
+      leituraPendente = null;
+      pedirLeitura(proxima);
+    }
+  });
+}
+
+let minhaJanela = null; // o painel é de uma janela: só segue as abas dela
+let esperaTroca = null;
+
+function paginaSaindo(windowId) {
+  // A pessoa saiu da página que estava sendo lida: cala na hora, sem
+  // esperar a próxima carregar
+  if (lerAutomaticamente && windowId === minhaJanela) pararLeitura();
+}
+
+function paginaMudou(windowId) {
+  if (!lerAutomaticamente || windowId !== minhaJanela) return;
+  // Junta eventos em sequência (redirecionamentos, troca rápida de abas)
+  clearTimeout(esperaTroca);
+  esperaTroca = setTimeout(() => pedirLeitura({ automatico: true }), 700);
+}
+
+// Página nova na aba ativa, ou troca de aba
+chrome.tabs.onUpdated.addListener((tabId, mudanca, aba) => {
+  if (!aba.active) return;
+  if (mudanca.status === "loading") paginaSaindo(aba.windowId);
+  if (mudanca.status === "complete") paginaMudou(aba.windowId);
+});
+chrome.tabs.onActivated.addListener((info) => {
+  paginaSaindo(info.windowId);
+  paginaMudou(info.windowId);
+});
+
+// Alt+Shift+K (background.js): pausa ou continua de qualquer lugar
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.tipo === "ALTERNAR_LEITURA" && !el.estadoLeitura.classList.contains("oculto")) alternarLeitura();
+});
+
+// Ao abrir o painel (clique no ícone ou Alt+Shift+L), já lê a página atual.
+// O Chrome não deixa extensões abrirem o painel sozinhas: é preciso um
+// clique ou atalho, então "iniciar com o navegador" começa por aqui.
+Promise.all([configuracaoCarregada, chrome.windows.getCurrent()]).then(([, janela]) => {
+  minhaJanela = janela.id;
+  if (lerAutomaticamente) pedirLeitura({ automatico: true });
+});
+
+function mostrarFalha(motivo, automatico) {
+  if (automatico) {
+    // Na leitura automática (ex.: nova aba, página interna do Chrome) não
+    // dispara alerta para o leitor de tela a cada troca: volta ao início
+    el.estadoInicial.querySelector("p").textContent =
+      `${motivo} Abra outra página para a leitura automática continuar.`;
+    mostrarEstado("estadoInicial");
+    return;
+  }
+  el.textoErro.textContent = motivo;
+  mostrarEstado("estadoErro");
+}
+
+function extrairPagina() {
+  return new Promise((resolve) => chrome.runtime.sendMessage({ tipo: "REQUEST_EXTRACT" }, resolve));
+}
+
+async function iniciarExtracao({ automatico = false } = {}) {
   pararLeitura();
   mostrarEstado("estadoCarregando");
   el.textoCarregando.textContent = "Extraindo conteúdo da página…";
 
-  chrome.runtime.sendMessage({ tipo: "REQUEST_EXTRACT" }, async (resposta) => {
-    if (!resposta || !resposta.ok) {
-      el.textoErro.textContent =
-        (resposta && resposta.motivo) || "Não foi possível ler esta página.";
-      mostrarEstado("estadoErro");
-      return;
-    }
+  const resposta = await extrairPagina();
+  if (!resposta || !resposta.ok) {
+    mostrarFalha((resposta && resposta.motivo) || "Não foi possível ler esta página.", automatico);
+    return;
+  }
 
-    // Mantém por enquanto as seções que só têm imagens: elas ganham texto
-    // na etapa de descrição e só depois as vazias são descartadas
-    errosDescricao = [];
-    textosDaPagina = [];
-    imagensDaPagina = resposta.secoes.flatMap((s) => s.imagensSemAlt || []);
-    secoes = resposta.secoes.filter(
-      (s) => (s.texto && s.texto.length > 0) || (s.imagensSemAlt && s.imagensSemAlt.length > 0)
-    );
+  // Mantém por enquanto as seções que só têm imagens: elas ganham texto
+  // na etapa de descrição e só depois as vazias são descartadas
+  errosDescricao = [];
+  textosDaPagina = [];
+  imagensDaPagina = resposta.secoes.flatMap((s) => s.imagensSemAlt || []);
+  secoes = resposta.secoes.filter(
+    (s) => (s.texto && s.texto.length > 0) || (s.imagensSemAlt && s.imagensSemAlt.length > 0)
+  );
 
-    if (secoes.length === 0) {
-      el.textoErro.textContent = "Nenhum conteúdo legível foi encontrado nesta página.";
-      mostrarEstado("estadoErro");
-      return;
-    }
+  if (secoes.length === 0) {
+    mostrarFalha("Nenhum conteúdo legível foi encontrado nesta página.", automatico);
+    return;
+  }
 
-    // Traduz antes do resto: a reestruturação e as descrições de imagem já
-    // saem em português
-    idiomaLeitura = "pt-BR";
-    const idioma = await detectarIdioma(resposta);
-    let traduzida = false;
-    if (idioma !== "pt") {
-      if (traduzirPaginas && URL_BACKEND) traduzida = await traduzirPagina(resposta, idioma);
-      if (!traduzida) idiomaLeitura = idioma; // lê no original, com voz do idioma
-    }
+  // Traduz antes do resto: a reestruturação e as descrições de imagem já
+  // saem em português
+  idiomaLeitura = "pt-BR";
+  const idioma = await detectarIdioma(resposta);
+  let traduzida = false;
+  if (idioma !== "pt") {
+    if (traduzirPaginas && URL_BACKEND) traduzida = await traduzirPagina(resposta, idioma);
+    if (!traduzida) idiomaLeitura = idioma; // lê no original, com voz do idioma
+  }
 
-    if (apiKey) await reestruturarComIA();
-    // As imagens com alt já viraram texto no content.js; só as sem alt vão para a IA
-    const usarIA = descreverImagens && Boolean(URL_BACKEND);
-    if (usarIA) await descreverImagensSemAlt();
-    else avisarImagensSemDescricao();
-    secoes = secoes.filter((s) => s.texto && s.texto.length > 0);
+  if (apiKey) await reestruturarComIA();
+  // As imagens com alt já viraram texto no content.js; só as sem alt vão para a IA
+  const usarIA = descreverImagens && Boolean(URL_BACKEND);
+  if (usarIA) await descreverImagensSemAlt();
+  else avisarImagensSemDescricao();
+  secoes = secoes.filter((s) => s.texto && s.texto.length > 0);
+  // A pessoa já foi para outra página enquanto esta era preparada: não lê
+  if (leituraPendente) return;
 
-    el.tituloArtigo.textContent = resposta.titulo;
-    el.metaArtigo.textContent = [
-      resposta.autor,
-      `~${resposta.tempoLeituraMin} min de leitura`,
-      traduzida ? `traduzido do ${nomeDoIdioma(idioma)}` : idioma !== "pt" ? `lido em ${nomeDoIdioma(idioma)}` : null,
-      apiKey ? "reestruturado por IA" : "texto original",
-      usarIA ? "imagens sem alt descritas por IA" : null,
-    ]
-      .filter(Boolean)
-      .join(" · ");
+  el.tituloArtigo.textContent = resposta.titulo;
+  el.metaArtigo.textContent = [
+    resposta.autor,
+    `~${resposta.tempoLeituraMin} min de leitura`,
+    traduzida ? `traduzido do ${nomeDoIdioma(idioma)}` : idioma !== "pt" ? `lido em ${nomeDoIdioma(idioma)}` : null,
+    apiKey ? "reestruturado por IA" : "texto original",
+    usarIA ? "imagens sem alt descritas por IA" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
-    montarListaSecoes();
-    mostrarDiagnostico();
-    indiceAtual = 0;
-    exibirSecaoAtual();
-    mostrarEstado("estadoLeitura");
-    // O botão "Ler esta página" sumiu: leva o foco para o play, senão ele
-    // se perde no <body> e o usuário de teclado/leitor de tela fica sem rumo
-    el.btnPlayPause.focus();
+  montarListaSecoes();
+  mostrarDiagnostico();
+  indiceAtual = 0;
+  trechoAtual = 0;
+  exibirSecaoAtual();
+  mostrarEstado("estadoLeitura");
+  // O botão "Ler esta página" sumiu: leva o foco para o play, senão ele
+  // se perde no <body> e o usuário de teclado/leitor de tela fica sem rumo.
+  // Na leitura automática o foco fica onde está (na página), senão cada
+  // página aberta tiraria a pessoa do lugar.
+  if (!automatico) el.btnPlayPause.focus();
+  if (lerAutomaticamente) {
+    // A voz já começa a ler; o anúncio falaria por cima dela
+    alternarLeitura();
+  } else {
     anunciar(
       `Conteúdo carregado: ${resposta.titulo}. ${secoes.length} ${secoes.length === 1 ? "seção" : "seções"}.`
     );
-  });
+  }
 }
 
 // ---------- tradução ----------
@@ -389,6 +485,7 @@ el.btnProxima.addEventListener("click", () => irPara(indiceAtual + 1));
 function irPara(novoIndice) {
   if (novoIndice < 0 || novoIndice >= secoes.length) return;
   indiceAtual = novoIndice;
+  trechoAtual = 0;
   exibirSecaoAtual();
   if (falando) {
     lerSecaoAtual();
@@ -406,6 +503,11 @@ el.btnPlayPause.addEventListener("click", alternarLeitura);
 el.inputVelocidade.addEventListener("input", () => {
   el.valorVelocidade.textContent = `${Number(el.inputVelocidade.value).toFixed(1)}×`;
 });
+// A página inteira já está na fila da voz com a velocidade antiga: ao soltar
+// o controle, refaz a fila a partir do trecho atual com a nova velocidade
+el.inputVelocidade.addEventListener("change", () => {
+  if (falando) lerSecaoAtual(trechoAtual);
+});
 
 function alternarLeitura() {
   if (falando) {
@@ -414,23 +516,23 @@ function alternarLeitura() {
     falando = true;
     el.btnPlayPause.textContent = "⏸ Pausar";
     el.btnPlayPause.setAttribute("aria-label", "Pausar leitura");
-    lerSecaoAtual();
+    lerSecaoAtual(trechoAtual); // continua de onde parou
   }
 }
 
 function pararLeitura() {
   falando = false;
   geracaoFala += 1;
-  speechSynthesis.cancel();
+  chrome.tts.stop();
   el.btnPlayPause.textContent = "▶ Ler";
   el.btnPlayPause.setAttribute("aria-label", "Reproduzir leitura");
 }
 
-const TAMANHO_MAX_TRECHO = 200;
+const TAMANHO_MAX_TRECHO = 500;
 
 function dividirEmTrechos(texto) {
-  // O Chrome corta falas longas (~15s) em várias vozes, então a seção é
-  // lida em trechos curtos, preferindo quebrar no fim das frases.
+  // A seção é lida em trechos, quebrando no fim das frases: assim pausar e
+  // continuar volta ao trecho em que parou, e não ao começo da seção.
   const frases = texto.match(/[^.!?…]+(?:[.!?…]+["')\]]*|$)\s*/g) || [texto];
   const trechos = [];
   let atual = "";
@@ -455,46 +557,49 @@ function dividirEmTrechos(texto) {
   return trechos;
 }
 
-function lerSecaoAtual() {
-  speechSynthesis.cancel();
+function lerSecaoAtual(trechoInicial = 0) {
+  // Coloca de uma vez na fila da voz todos os trechos, da seção atual até o
+  // fim da página. Antes cada trecho só era pedido quando o anterior
+  // terminava, e a voz do sistema fazia uma pausa entre eles; com a fila
+  // cheia ela emenda um no outro, como uma leitura contínua.
+  // chrome.tts (voz das extensões) em vez da Web Speech API: o Chrome só
+  // deixa uma página falar depois que o usuário clica nela, e a leitura
+  // automática começa sem clique. As vozes são as mesmas do sistema.
+  chrome.tts.stop();
   const geracao = ++geracaoFala;
-  const secao = secoes[indiceAtual];
-  if (!secao) return;
+  const velocidade = Number(el.inputVelocidade.value);
+  let primeiro = true;
 
-  const trechos = dividirEmTrechos((secao.titulo ? secao.titulo + ". " : "") + secao.texto);
-  let proximo = 0;
-
-  function falarProximoTrecho() {
-    // Callback de uma leitura que já foi cancelada (navegou/pausou): ignora,
-    // senão ela avançaria de seção sozinha.
-    if (geracao !== geracaoFala || !falando) return;
-
-    if (proximo >= trechos.length) {
-      if (indiceAtual < secoes.length - 1) {
-        indiceAtual += 1;
-        exibirSecaoAtual();
-        lerSecaoAtual();
-      } else {
-        pararLeitura();
-      }
-      return;
-    }
-
-    const utter = new SpeechSynthesisUtterance(trechos[proximo++]);
-    utter.lang = idiomaLeitura;
-    // lida a cada trecho: mudar a velocidade vale a partir da próxima frase
-    utter.rate = Number(el.inputVelocidade.value);
-    utter.onend = falarProximoTrecho;
-    utter.onerror = (evento) => {
-      // "interrupted"/"canceled" vêm do nosso próprio cancel(); outros erros
-      // pulam o trecho em vez de travar a leitura
-      if (evento.error !== "interrupted" && evento.error !== "canceled") falarProximoTrecho();
-    };
-    utteranceAtual = utter;
-    speechSynthesis.speak(utter);
+  for (let s = indiceAtual; s < secoes.length; s++) {
+    const secao = secoes[s];
+    const trechos = dividirEmTrechos((secao.titulo ? secao.titulo + ". " : "") + secao.texto);
+    trechos.forEach((trecho, t) => {
+      if (s === indiceAtual && t < trechoInicial) return;
+      const ultimoDaPagina = s === secoes.length - 1 && t === trechos.length - 1;
+      chrome.tts.speak(trecho, {
+        lang: idiomaLeitura,
+        rate: velocidade,
+        enqueue: !primeiro, // o primeiro substitui o que estiver falando
+        onEvent: (evento) => {
+          // Evento de uma fila que já foi cancelada (navegou/pausou): ignora
+          if (geracao !== geracaoFala) return;
+          if (evento.type === "start") {
+            // A voz chegou neste trecho: acompanha no painel
+            trechoAtual = t;
+            if (indiceAtual !== s) {
+              indiceAtual = s;
+              exibirSecaoAtual();
+            }
+          } else if (ultimoDaPagina && (evento.type === "end" || evento.type === "error")) {
+            trechoAtual = 0;
+            pararLeitura();
+          }
+        },
+      });
+      primeiro = false;
+    });
   }
-
-  falarProximoTrecho();
+  if (primeiro) pararLeitura(); // nada para ler
 }
 
 // ---------- atalhos de teclado ----------
