@@ -224,9 +224,13 @@ function falarTrechos(trechos, inicio, lang, velocidade, tabId, documentoId) {
   }
 }
 
+function falarAviso(texto, config) {
+  // Avisos curtos; a leitura de verdade (enqueue: false) os substitui
+  chrome.tts.speak(texto, { lang: "pt-BR", rate: config.velocidade });
+}
+
 function avisarCarregando(config) {
-  // A leitura de verdade (enqueue: false) substitui este aviso quando chegar
-  chrome.tts.speak("Carregando a página.", { lang: "pt-BR", rate: config.velocidade });
+  falarAviso("Carregando a página.", config);
 }
 
 async function lerNoFundo(tab, documentoId) {
@@ -317,15 +321,47 @@ chrome.tabs.onActivated.addListener((info) => {
   agendarLeituraDeFundo(info.tabId, { trocouDeAba: true });
 });
 
-// Ao abrir o navegador: avisa que está ativo (a primeira página costuma ser
-// a nova aba, que não tem o que ler)
-chrome.runtime.onStartup.addListener(async () => {
+// Ao abrir o navegador: a página inicial (ou as abas restauradas) costuma
+// terminar de carregar ANTES de a extensão ficar pronta, e o aviso "a aba
+// carregou" se perde. Por isso, ao iniciar, a extensão procura a aba ativa
+// e lê por conta própria, sem esperar esse aviso.
+const ESPERA_MAX_ABA_INICIAL_MS = 15 * 1000;
+
+function podeSerLida(url) {
+  return /^(https?|file):/i.test(url || "");
+}
+
+async function abaAtivaAoIniciar() {
+  const [focada] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (focada) return focada;
+  const [qualquer] = await chrome.tabs.query({ active: true });
+  return qualquer || null;
+}
+
+async function lerAoIniciar() {
   const config = await lerConfiguracao();
   if (!config.lerSemPainel) return;
-  chrome.tts.speak("Leitor Acessível ativo. Abra uma página para ouvir.", {
-    lang: "pt-BR",
-    rate: config.velocidade,
-  });
+  // Espera a aba ativa terminar de carregar (até 15 s)
+  const limite = Date.now() + ESPERA_MAX_ABA_INICIAL_MS;
+  let aba = await abaAtivaAoIniciar();
+  while (aba && aba.status !== "complete" && Date.now() < limite) {
+    await new Promise((r) => setTimeout(r, 500));
+    aba = await abaAtivaAoIniciar();
+  }
+  if (aba && podeSerLida(aba.url) && !painelAbertoNaJanela(aba.windowId)) {
+    registrar("navegador aberto: lendo a aba", aba.url);
+    falarAviso("Leitor Acessível ativo.", config);
+    agendarLeituraDeFundo(aba.id, { trocouDeAba: true });
+  } else {
+    // Nova aba ou página interna do Chrome: não há o que ler ainda
+    falarAviso("Leitor Acessível ativo. Abra uma página para ouvir.", config);
+  }
+}
+
+chrome.runtime.onStartup.addListener(lerAoIniciar);
+// Ao instalar a extensão, também já se apresenta e lê a aba aberta
+chrome.runtime.onInstalled.addListener((detalhes) => {
+  if (detalhes.reason === "install") lerAoIniciar();
 });
 
 // Alt+Shift+K com o painel fechado: pausa, continua de onde parou ou, se
