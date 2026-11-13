@@ -120,7 +120,27 @@ async function descreverEmParalelo(lista, detalhe) {
   return resultados;
 }
 
-async function prepararPagina(tabId, url, config, aoDemorar) {
+// O Chrome desliga o service worker depois de ~30 s sem atividade. Com o
+// painel fechado é ele quem espera a tradução e as descrições: uma página
+// grande deixava o service worker ser desligado no meio, e a leitura nunca
+// começava. Chamar uma API da extensão de tempos em tempos conta como
+// atividade.
+const INTERVALO_MANTER_LIGADO_MS = 20 * 1000;
+
+async function manterLigadoDurante(tarefa) {
+  const intervalo = setInterval(() => chrome.runtime.getPlatformInfo().catch(() => {}), INTERVALO_MANTER_LIGADO_MS);
+  try {
+    return await tarefa();
+  } finally {
+    clearInterval(intervalo);
+  }
+}
+
+function prepararPagina(tabId, url, config, aoDemorar) {
+  return manterLigadoDurante(() => prepararPaginaAgora(tabId, url, config, aoDemorar));
+}
+
+async function prepararPaginaAgora(tabId, url, config, aoDemorar) {
   const resposta = await extrairDaAba(tabId, url);
   if (!resposta || !resposta.ok) {
     registrar("página não lida:", (resposta && resposta.motivo) || "sem resposta", url);
@@ -193,6 +213,11 @@ async function prepararPagina(tabId, url, config, aoDemorar) {
       for (const texto of dividirEmTrechos(bloco.texto)) trechos.push({ texto, id: bloco.id });
     }
   }
+  // Sem o painel não há aviso na tela: se a tradução falhou, a leitura
+  // começa dizendo por que a página vai ser lida no idioma original
+  if (traduzir && !traducao) {
+    trechos.unshift({ texto: "Não foi possível traduzir a página. Lendo no idioma original.", id: null, aviso: true });
+  }
   return { trechos, lang: idioma === "pt" ? "pt-BR" : idioma, documentoId: resposta.documentoId || null };
 }
 
@@ -204,7 +229,7 @@ function falarTrechos(trechos, inicio, lang, velocidade, tabId, documentoId) {
   fundo.falando = true;
   for (let i = inicio; i < trechos.length; i++) {
     chrome.tts.speak(trechos[i].texto, {
-      lang,
+      lang: trechos[i].aviso ? "pt-BR" : lang, // avisos da extensão são em português
       rate: velocidade,
       enqueue: i !== inicio, // o primeiro substitui o que estiver falando
       onEvent: (evento) => {

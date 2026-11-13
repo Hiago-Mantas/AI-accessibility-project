@@ -249,8 +249,12 @@ async function descreverImagem(src, detalhe, pngConvertido) {
 
 // Lotes menores que o limite do backend (60 textos / 12.000 caracteres)
 const LOTE_MAX_TEXTOS = 40;
-const LOTE_MAX_CARACTERES = 6000;
+// Lotes pequenos: cada pedido volta rápido. O Chrome desliga o service
+// worker quando um pedido à internet passa de 30 s, e com o painel fechado
+// é ele quem espera a tradução (a leitura se perdia no meio).
+const LOTE_MAX_CARACTERES = 2500;
 const LOTES_EM_PARALELO = 3;
+const LIMITE_PEDIDO_TRADUCAO_MS = 25 * 1000; // desiste antes dos 30 s do Chrome
 
 function montarLotes(textos) {
   const lotes = [];
@@ -319,8 +323,10 @@ async function traduzirTextos(textos, origem) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ textos: lote, origem }),
+        signal: AbortSignal.timeout(LIMITE_PEDIDO_TRADUCAO_MS),
       });
     } catch (erro) {
+      if (erro.name === "TimeoutError") throw falhaNaEtapa("backend", "a tradução demorou demais (mais de 25 s)");
       throw falhaNaEtapa("falar com o backend (ele está rodando?)", erro);
     }
     const dados = await resposta.json().catch(() => ({}));
