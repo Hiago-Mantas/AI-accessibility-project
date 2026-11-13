@@ -8,8 +8,6 @@
 
 <sub>Baixa a versão mais recente do branch `main` (extensão + backend). Veja [Como instalar](#-como-instalar).</sub>
 
-Projeto individual da disciplina **Projetos (Engenharia de Software)**.
-
 ## 📑 Sumário
 
 - [Problema](#-problema)
